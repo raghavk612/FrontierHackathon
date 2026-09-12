@@ -158,3 +158,7 @@ select:focus-visible { outline:3px solid #ffd17c; outline-offset:3px; }
  .stage { height:clamp(390px,calc(100svh - 330px),610px); }
 }
 @media(max-width:360px) { .topbar { padding-bottom:2px; margin-bottom:4px; } }
+.app-shell > .cursor { position:fixed; z-index:90; }
+.access-panel .dwell-near,.transcript-toggle.dwell-near,.guide-help.dwell-near { outline:3px solid #ffd17c; outline-offset:3px; box-shadow:0 0 16px #ffd17c55; }
+.team-credit { margin:16px 0 2px; text-align:center; font-size:12px; color:#accac0; }
+.team-credit strong { color:#d8eee6; }

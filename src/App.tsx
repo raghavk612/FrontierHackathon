@@ -377,7 +377,9 @@ function App() {
   const [largeText, setLargeText] = useState(false)
   const [highContrast, setHighContrast] = useState(false)
   const [reduceMotion, setReduceMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches)
-  guideOpenRef.current = guideOpen || welcomeOpen || pointerPaused
+  const pointerPausedRef = useRef(false)
+  pointerPausedRef.current = pointerPaused
+  guideOpenRef.current = guideOpen || welcomeOpen
     const [aiEnabled, setAiEnabled] = useState(aiAvailable)
   const [aiStatus, setAiStatus] = useState('Checking OpenAI…')
   const aiEnabledRef = useRef(true)
@@ -691,7 +693,15 @@ function App() {
     const stageElement = stageRef.current
     if (!stageElement) return
     const bounds = stageElement.getBoundingClientRect()
-    rectsRef.current = Array.from(stageElement.querySelectorAll<HTMLElement>('[data-dwell-target]')).map((element) => {
+    const controls = Array.from(document.querySelectorAll<HTMLElement>('.access-panel button, .access-panel input, .access-panel select, .transcript-toggle, .guide-help'))
+    controls.forEach((element, index) => {
+      element.dataset.dwellTarget = `control-${index}`
+      element.dataset.dwellAction = 'control'
+    })
+    rectsRef.current = [...Array.from(stageElement.querySelectorAll<HTMLElement>('[data-dwell-target]')), ...controls].filter(element => {
+      const rect = element.getBoundingClientRect()
+      return !element.matches(':disabled') && rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < window.innerHeight
+    }).map((element) => {
       const rect = element.getBoundingClientRect()
       const halfWidth = (rect.width / bounds.width) * 50
       const halfHeight = (rect.height / bounds.height) * 50
@@ -710,9 +720,22 @@ function App() {
     }
   }, [])
 
+  useEffect(() => { refreshRects() })
+
   const commitSelection = useCallback((element: HTMLElement) => {
     const label = element.dataset.dwellTarget ?? ''
     const action = element.dataset.dwellAction ?? 'word'
+    if (action === 'control') {
+      cooldownUntilRef.current = performance.now() + COOLDOWN_MS
+      dwellRef.current = { target: '', progress: 0 }; dwellScoresRef.current.clear()
+      if (!element.matches(':disabled')) {
+        if (element instanceof HTMLSelectElement) {
+          element.selectedIndex = (element.selectedIndex + 1) % element.options.length
+          element.dispatchEvent(new Event('change', { bubbles: true }))
+        } else element.click()
+      }
+      return
+    }
     const phrase = element.dataset.dwellSpeech || label
     cooldownUntilRef.current = performance.now() + COOLDOWN_MS
     dwellRef.current = { target: '', progress: 0 }
@@ -851,18 +874,28 @@ function App() {
       // land inside a word means the tolerance is half a tile; picking the closest
       // word means it is half the gap between words, which is far more forgiving.
       // Both side edges park the pointer, as does the label strip under the board.
-      const restingLeft = x <= REST_EDGE
-      const restingRight = x >= 100 - REST_EDGE
+      const inBoard = x >= 0 && x <= 100 && y >= 0 && y <= 100
+      const restingLeft = inBoard && x <= REST_EDGE
+      const restingRight = inBoard && x >= 100 - REST_EDGE
       restLeftRef.current?.classList.toggle('active', restingLeft)
       restRightRef.current?.classList.toggle('active', restingRight)
-      const resting = restingLeft || restingRight || y >= BOARD_FLOOR
+      const resting = restingLeft || restingRight || (inBoard && y >= BOARD_FLOOR)
 
       let nearest: HTMLElement | null = null
       let bestDistance = Infinity
-      if (!resting && !blinking && now >= cooldownUntilRef.current) {
+      if (!blinking && now >= cooldownUntilRef.current) {
         const weight = axisWeightRef.current
         const charging = dwellRef.current.target
+        const bounds = stageRef.current!.getBoundingClientRect()
+        const px = bounds.left + x * bounds.width / 100
+        const py = bounds.top + y * bounds.height / 100
         for (const entry of rectsRef.current) {
+          if (entry.element.matches(':disabled')) continue
+          if (entry.element.dataset.dwellAction === 'control') {
+            const box = entry.element.getBoundingClientRect()
+            const hit = entry.element instanceof HTMLInputElement ? entry.element.closest('label')?.getBoundingClientRect() ?? box : box
+            if (px < hit.left || px > hit.right || py < hit.top || py > hit.bottom) continue
+          } else if (!inBoard || resting || pointerPausedRef.current) continue
           let distance = Math.hypot((x - entry.centerX) * weight.x, (y - entry.centerY) * weight.y)
           // The word already charging holds on unless another is clearly closer, so the
           // cursor sitting on a boundary does not thrash between two neighbours.
@@ -1055,26 +1088,28 @@ function App() {
 
         if (!signals.blinking && Number.isFinite(raw.x) && Number.isFinite(raw.y)) {
           const history = historyRef.current
-          const window = STABILITY_PRESETS[stabilityRef2.current].median
+          const medianWindow = STABILITY_PRESETS[stabilityRef2.current].median
           history.x.push(raw.x)
           history.y.push(raw.y)
-          while (history.x.length > window) history.x.shift()
-          while (history.y.length > window) history.y.shift()
+          while (history.x.length > medianWindow) history.x.shift()
+          while (history.y.length > medianWindow) history.y.shift()
+          const bounds = stageRef.current!.getBoundingClientRect()
           cursorPosRef.current = {
-            x: clamp(filterXRef.current.filter(medianOf(history.x), now), 2, 98),
-            y: clamp(filterYRef.current.filter(medianOf(history.y), now), 2, 98),
+            x: clamp(filterXRef.current.filter(medianOf(history.x), now), (8 - bounds.left) / bounds.width * 100, (window.innerWidth - 8 - bounds.left) / bounds.width * 100),
+            y: clamp(filterYRef.current.filter(medianOf(history.y), now), (8 - bounds.top) / bounds.height * 100, (window.innerHeight - 8 - bounds.top) / bounds.height * 100),
           }
         }
 
         const { x, y } = cursorPosRef.current
-        cursor.style.left = `${x}%`
-        cursor.style.top = `${y}%`
+        const bounds = stageRef.current!.getBoundingClientRect()
+        cursor.style.left = `${bounds.left + x * bounds.width / 100}px`
+        cursor.style.top = `${bounds.top + y * bounds.height / 100}px`
         if (modeRef.current === 'live' && neutralRef.current && !recenterAtRef.current && !guideOpenRef.current) updateDwell(x, y, now, signals.blinking)
 
         // Read gestures off the head pose directly rather than the smoothed pointer: the
         // median window and One Euro filter exist to damp exactly the motion a nod is
         // made of, so a shake barely shows up by the time it reaches the cursor.
-        if (modeRef.current === 'live' && neutralRef.current && !recenterAtRef.current && !guideOpenRef.current && gesturesOnRef.current && !signals.blinking) {
+        if (modeRef.current === 'live' && neutralRef.current && !recenterAtRef.current && !guideOpenRef.current && !pointerPausedRef.current && gesturesOnRef.current && !signals.blinking) {
           const gesture = gestureRef.current.push(now, signals.head[HEAD_YAW], signals.head[HEAD_PITCH])
           if (gesture) fireGestureRef.current(gesture)
         } else if (modeRef.current !== 'live') {
@@ -1633,6 +1668,9 @@ function App() {
           </div>
         </div>
       )}
+          <div ref={cursorRef} className="cursor" aria-hidden="true" style={{ visibility: guideOpen || welcomeOpen || cameraState !== 'ready' ? 'hidden' : 'visible' }}>
+            <span />
+          </div>
       <header className="topbar">
         <div>
           <p className="eyebrow">VIVIDVISION / ASSISTIVE COMMUNICATION</p>
@@ -1827,9 +1865,7 @@ function App() {
             </>
           )}
 
-          <div ref={cursorRef} className="cursor" aria-hidden="true" style={{ visibility: guideOpen ? 'hidden' : 'visible' }}>
-            <span />
-          </div>
+
 
           {boardReady && !guideOpen && (
             <>
@@ -1948,7 +1984,7 @@ function App() {
             }}>{pointerPaused ? 'Resume pointing' : 'Pause pointing'}</button>
             <button className="secondary-button" onClick={resetPosition} disabled={cameraState !== 'ready' || cameraPaused || collecting || positioning}>Reset position</button>
           </div>
-          <p className="access-status" role="status">{pointerPaused ? 'Pointing paused. Touch and keyboard still work.' : 'Hold on a word to select. Rest at either edge.'}</p>
+          <p className="access-status" role="status">{pointerPaused ? 'Word selection paused. Point at Resume pointing to continue.' : 'Hold on a word or control to select. Rest inside either board edge.'}</p>
           <div className="access-options">
             <label><input type="checkbox" checked={largeText} onChange={e => setLargeText(e.target.checked)} />Larger text</label>
             <label><input type="checkbox" checked={highContrast} onChange={e => setHighContrast(e.target.checked)} />High contrast</label>
@@ -1957,6 +1993,7 @@ function App() {
           </div>
           <label className="access-select">Pointer steadiness<select value={stability} onChange={e => setStability(e.target.value as StabilityKey)}>{Object.keys(STABILITY_PRESETS).map(key => <option key={key} value={key}>{key}</option>)}</select></label>
           <div className="ai-controls"><label><input type="checkbox" checked={aiEnabled} disabled={!aiAvailable} onChange={e => setAiEnabled(e.target.checked)} />OpenAI reply suggestions</label><p role="status">{aiStatus}</p><small>When enabled, transcribed text and recent conversation are sent to OpenAI for relevant replies. Your API key stays on the server.</small></div>
+          <p className="team-credit">Courtesy of <strong>Triple Tech</strong></p>
         </aside>
 
 
