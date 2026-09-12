@@ -90,3 +90,26 @@ select:focus-visible { outline:3px solid #ffd17c; outline-offset:3px; }
  .transcript-rail { padding:4px 8px; }
  .transcript-feed { max-height:2.8em; }
 }
+/* Fit the primary workspace to a laptop screen; history stays below it. */
+@media(min-width:1100px) and (min-height:600px) {
+ .app-shell { padding:10px 14px; }
+ .topbar { margin-bottom:10px; padding-bottom:10px; }
+ .topbar h1 { font-size:clamp(26px,2.6vw,40px); }
+ .workspace { gap:10px; grid-template-columns:minmax(0,1fr) 320px; }
+ .stage { aspect-ratio:auto; height:calc(100dvh - 195px); min-height:365px; }
+ .access-panel { padding:10px 12px; }
+ .access-panel h2 { font-size:19px; }
+ .access-intro p:last-child { display:none; }
+ .access-intro .section-kicker { margin-bottom:4px; }
+ .access-intro { margin-bottom:8px; }
+ .access-options { margin-top:6px; padding-top:2px; }
+ .access-status { margin:5px 0; font-size:12px; }
+ .ai-controls { margin-top:5px; padding-top:2px; }
+ .ai-controls p { margin:4px 0; }
+ .ai-controls small { font-size:11px; line-height:1.3; }
+ .transcript-rail { padding:5px 10px; }
+}
+@media(min-width:1100px) and (min-height:600px) and (max-height:700px) {
+ .access-intro .section-kicker { display:none; }
+ .access-panel { padding-top:8px; padding-bottom:8px; }
+}
