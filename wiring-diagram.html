@@ -1,0 +1,229 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  body { margin: 0; background: #0d1417; font-family: 'Helvetica Neue', Arial, sans-serif; }
+  #sheet { width: 1240px; padding: 34px 40px 40px; box-sizing: border-box; }
+  h1 { color: #eaf1ed; font-size: 25px; margin: 0 0 4px; letter-spacing: .2px; }
+  p.sub { color: #86a49c; font-size: 14px; margin: 0 0 22px; }
+  .legend { display: flex; gap: 26px; margin-top: 22px; }
+  .legend div { flex: 1; color: #c7d6d1; font-size: 13px; line-height: 1.55; }
+  .legend h2 { color: #9fe3c4; font-size: 12px; letter-spacing: 1.4px; text-transform: uppercase; margin: 0 0 7px; }
+  .legend b { color: #eaf1ed; }
+  code { color: #ffd08a; font-family: 'SF Mono', Menlo, monospace; font-size: 12.5px; }
+</style>
+</head>
+<body>
+<div id="sheet">
+  <h1>ClearSpeak beacon &mdash; breadboard layout</h1>
+  <p class="sub">Particle Argon &middot; 2 LEDs &middot; 2 resistors &middot; no jumper wires required</p>
+
+  <svg width="1160" height="600" viewBox="0 0 1160 600" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="bb" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#f4f1e8"/><stop offset="100%" stop-color="#e2ddcd"/>
+      </linearGradient>
+    </defs>
+
+    <!-- breadboard body -->
+    <rect x="40" y="16" width="1080" height="548" rx="9" fill="url(#bb)" stroke="#c3bda9" stroke-width="1.5"/>
+
+    <!-- power rails -->
+    <line x1="62" y1="42" x2="1098" y2="42" stroke="#d4574e" stroke-width="2"/>
+    <line x1="62" y1="64" x2="1098" y2="64" stroke="#3f6fb5" stroke-width="2"/>
+    <line x1="62" y1="516" x2="1098" y2="516" stroke="#3f6fb5" stroke-width="2"/>
+    <line x1="62" y1="538" x2="1098" y2="538" stroke="#d4574e" stroke-width="2"/>
+    <text x="46" y="46" font-size="11" fill="#d4574e" font-weight="700">+</text>
+    <text x="46" y="68" font-size="11" fill="#3f6fb5" font-weight="700">&minus;</text>
+    <text x="46" y="520" font-size="11" fill="#3f6fb5" font-weight="700">&minus;</text>
+    <text x="46" y="542" font-size="11" fill="#d4574e" font-weight="700">+</text>
+    <text x="70" y="506" font-size="10" fill="#9c9482">power rails &mdash; not used in this build</text>
+
+    <!-- centre channel -->
+    <rect x="40" y="196" width="1080" height="26" fill="#dcd6c4"/>
+    <line x1="40" y1="196" x2="1120" y2="196" stroke="#c3bda9"/>
+    <line x1="40" y1="222" x2="1120" y2="222" stroke="#c3bda9"/>
+
+    <g id="holes"></g>
+    <g id="rowlabels"></g>
+    <g id="collabels"></g>
+
+    <!-- the Argon, drawn see-through so the columns underneath stay readable -->
+    <g id="argon"></g>
+
+    <!-- components -->
+    <g id="parts"></g>
+  </svg>
+
+  <div class="legend">
+    <div>
+      <h2>How to place it</h2>
+      <b>1.</b> Push the Argon in so it straddles the middle channel, with the header
+      printed <code>GND A0 A1 A2 A3</code> along the bottom.<br/>
+      <b>2.</b> Red LED: <b>long</b> leg in the <code>A0</code> column, <b>short</b> leg in the
+      <code>A1</code> column.<br/>
+      <b>3.</b> Resistor from the <code>A1</code> column to the <code>GND</code> column.<br/>
+      <b>4.</b> Second LED: long leg in <code>A2</code>, short leg in <code>A3</code>.<br/>
+      <b>5.</b> Second resistor from <code>A3</code> to <code>GND</code>.
+    </div>
+    <div>
+      <h2>Why it works without wires</h2>
+      Every <b>column of five holes</b> is one electrical connection, so a pin and a
+      component lead in the same column are joined. The LED legs and resistor leads
+      <b>are</b> the wiring.<br/><br/>
+      <code>A1</code> and <code>A3</code> are only meeting points for two leads. The firmware
+      never drives them, so they sit as unused inputs.
+    </div>
+    <div>
+      <h2>Watch for</h2>
+      <b>LED polarity.</b> Long leg towards the A pin, short leg towards the resistor. Backwards
+      means no light and no harm.<br/><br/>
+      <b>Resistor value.</b> Anything from 220&nbsp;&Omega; to 1&nbsp;k&Omega; is fine on 3.3&nbsp;V.
+      Direction does not matter.<br/><br/>
+      <b>Antenna.</b> Leave it connected and do not pull it off. Bluetooth uses the on-board
+      antenna, not that one.
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+const X0 = 74, PITCH = 33.6, COLS = 30;
+const ROWS = { j: 92, i: 118, h: 144, g: 170, f: 196, e: 222, d: 248, c: 274, b: 300, a: 326 };
+const colX = (n) => X0 + (n - 1) * PITCH;
+
+const holes = document.getElementById('holes');
+const svgns = 'http://www.w3.org/2000/svg';
+function el(name, attrs) {
+  const node = document.createElementNS(svgns, name);
+  for (const k in attrs) node.setAttribute(k, attrs[k]);
+  return node;
+}
+
+// hole grid
+for (let c = 1; c <= COLS; c++) {
+  for (const r of ['j','i','h','g','f','e','d','c','b','a']) {
+    const y = r === 'f' ? 190 : r === 'e' ? 228 : ROWS[r];
+    holes.appendChild(el('rect', {
+      x: colX(c) - 4, y: y - 4, width: 8, height: 8, rx: 1.6,
+      fill: '#fbfaf5', stroke: '#bdb7a4', 'stroke-width': .9
+    }));
+  }
+}
+
+// row + column labels
+const rowLabels = document.getElementById('rowlabels');
+for (const r of ['j','i','h','g','f','e','d','c','b','a']) {
+  const y = r === 'f' ? 190 : r === 'e' ? 228 : ROWS[r];
+  for (const x of [54, 1106]) {
+    const t = el('text', { x, y: y + 3.5, 'font-size': 10, fill: '#9c9482', 'text-anchor': 'middle' });
+    t.textContent = r;
+    rowLabels.appendChild(t);
+  }
+}
+const colLabels = document.getElementById('collabels');
+for (let c = 1; c <= COLS; c += 5) {
+  const t = el('text', { x: colX(c), y: 82, 'font-size': 10, fill: '#9c9482', 'text-anchor': 'middle' });
+  t.textContent = c;
+  colLabels.appendChild(t);
+}
+
+// --- Argon ---------------------------------------------------------------
+// 16-pin header sits in row b, 12-pin header in row i, body straddles the channel.
+const PINS = ['RST','3V3','MD','GND','A0','A1','A2','A3','A4','A5','SCK','MI','MO','RX','TX','NC'];
+const HILITE = { GND: '#2f6f62', A0: '#c0392b', A1: '#c0392b', A2: '#2a72b5', A3: '#2a72b5' };
+const argon = document.getElementById('argon');
+
+argon.appendChild(el('rect', {
+  x: colX(1) - 17, y: ROWS.i - 15, width: 15 * PITCH + 34, height: (ROWS.b - ROWS.i) + 30,
+  rx: 7, fill: 'rgba(18,26,30,.80)', stroke: '#7fd9b4', 'stroke-width': 1.6, 'stroke-dasharray': '6 4'
+}));
+const boardName = el('text', { x: colX(8.5), y: 214, 'font-size': 19, fill: '#dff3ea', 'text-anchor': 'middle', 'font-weight': '700', 'letter-spacing': '3' });
+boardName.textContent = 'PARTICLE ARGON';
+argon.appendChild(boardName);
+const usbEnd = el('text', { x: colX(1) - 17, y: 250, 'font-size': 11, fill: '#7fd9b4', 'text-anchor': 'start' });
+usbEnd.textContent = '\u2190 micro-USB end';
+argon.appendChild(usbEnd);
+const topNote = el('text', { x: colX(8.5), y: ROWS.i - 22, 'font-size': 11, fill: '#7d918c', 'text-anchor': 'middle' });
+topNote.textContent = '12-pin header \u2014 not used in this build';
+argon.appendChild(topNote);
+
+PINS.forEach((pin, index) => {
+  const c = index + 1, x = colX(c);
+  const colour = HILITE[pin];
+  argon.appendChild(el('circle', { cx: x, cy: ROWS.b, r: 6.5, fill: colour || '#4a5c5f', stroke: '#dff3ea', 'stroke-width': colour ? 1.8 : .8 }));
+  const t = el('text', { x, y: ROWS.b - 13, 'font-size': colour ? 12 : 10, fill: colour ? '#eaf1ed' : '#8fa3a0', 'text-anchor': 'middle', 'font-weight': colour ? '700' : '400' });
+  t.textContent = pin;
+  argon.appendChild(t);
+  if (c <= 12) argon.appendChild(el('circle', { cx: x, cy: ROWS.i, r: 5, fill: '#3d4d50', stroke: '#96a8a4', 'stroke-width': .8 }));
+});
+
+// --- components ----------------------------------------------------------
+const parts = document.getElementById('parts');
+const A = ROWS.a;
+
+function lead(x1, y1, x2, y2, colour) {
+  parts.appendChild(el('path', {
+    d: `M ${x1} ${y1} L ${x2} ${y2}`, stroke: colour, 'stroke-width': 2.4,
+    fill: 'none', 'stroke-linecap': 'round'
+  }));
+}
+
+function ledPart(fromCol, toCol, y, colour) {
+  const x1 = colX(fromCol), x2 = colX(toCol), mid = (x1 + x2) / 2;
+  lead(x1, A, x1, y, '#7d837f');
+  lead(x2, A, x2, y, '#7d837f');
+  lead(x1, y, mid - 11, y, '#7d837f');
+  lead(x2, y, mid + 11, y, '#7d837f');
+  parts.appendChild(el('circle', { cx: mid, cy: y, r: 12, fill: colour, stroke: '#2b3a3a', 'stroke-width': 1.4 }));
+  // polarity marker sits on the long leg
+  const p = el('text', { x: x1 - 10, y: y - 7, 'font-size': 15, fill: colour, 'text-anchor': 'middle', 'font-weight': '700' });
+  p.textContent = '+';
+  parts.appendChild(p);
+}
+
+function resistorPart(fromCol, toCol, y) {
+  const x1 = colX(fromCol), x2 = colX(toCol), mid = (x1 + x2) / 2;
+  lead(x1, A, x1, y, '#7d837f');
+  lead(x2, A, x2, y, '#7d837f');
+  lead(x1, y, mid - 24, y, '#7d837f');
+  lead(x2, y, mid + 24, y, '#7d837f');
+  parts.appendChild(el('rect', { x: mid - 24, y: y - 7, width: 48, height: 14, rx: 4, fill: '#d8c79a', stroke: '#8d7d55', 'stroke-width': 1 }));
+  ['#6b4a2f', '#111', '#b5651d'].forEach((band, i) => {
+    parts.appendChild(el('rect', { x: mid - 14 + i * 9, y: y - 7, width: 4, height: 14, fill: band }));
+  });
+}
+
+ledPart(5, 6, 386, '#e8574a');
+resistorPart(6, 4, 434);
+ledPart(7, 8, 386, '#4aa3e8');
+resistorPart(8, 4, 478);
+
+// key, out in the empty half of the board where there is room to read it
+const KEY = [
+  ['#e8574a', 'dot', 'Red LED \u2014 the urgent light', 'A0 \u2192 A1'],
+  ['#4aa3e8', 'dot', 'Second LED \u2014 ordinary requests', 'A2 \u2192 A3'],
+  ['#d8c79a', 'res', 'Resistor', 'A1 \u2192 GND'],
+  ['#d8c79a', 'res', 'Resistor', 'A3 \u2192 GND'],
+];
+const keyX = colX(18);
+parts.appendChild(el('rect', { x: keyX - 14, y: 366, width: 372, height: 132, rx: 8, fill: 'rgba(18,26,30,.86)', stroke: '#3b524f' }));
+KEY.forEach((row, i) => {
+  const y = 396 + i * 29;
+  if (row[1] === 'dot') {
+    parts.appendChild(el('circle', { cx: keyX + 8, cy: y - 4, r: 8, fill: row[0], stroke: '#2b3a3a' }));
+  } else {
+    parts.appendChild(el('rect', { x: keyX, y: y - 10, width: 18, height: 11, rx: 3, fill: row[0], stroke: '#8d7d55' }));
+  }
+  const label = el('text', { x: keyX + 28, y: y, 'font-size': 12.5, fill: '#eaf1ed', 'font-weight': '600' });
+  label.textContent = row[2];
+  parts.appendChild(label);
+  const detail = el('text', { x: keyX + 232, y: y, 'font-size': 12, fill: '#ffd08a', 'font-family': 'SF Mono, Menlo, monospace' });
+  detail.textContent = row[3];
+  parts.appendChild(detail);
+});
+})();
+</script>
+</body>
+</html>

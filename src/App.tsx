@@ -19,6 +19,8 @@ import { openFrontCamera, watchCamera } from './camera'
 import type { SuggestionSet } from './suggest'
 import { BOARDS, TOP_ROW } from './vocabulary'
 import type { Tile } from './vocabulary'
+import { REQUEST, URGENT, bluetoothAvailable, createBeacon, serialAvailable } from './alert'
+import type { Beacon, BeaconStatus } from './alert'
 
 const DWELL_MS = 800
 const COOLDOWN_MS = 350
@@ -131,6 +133,19 @@ const RESTORE_TILE: Tile = { label: 'All words', restore: true, accent: 'folder'
 // answers to a question from two topics ago.
 const SUGGESTION_HOLD_MS = 30000
 
+// A word that has been chosen but not yet spoken. The accent rides along because the
+// beacon needs to know whether the finished sentence was an emergency, and by the time
+// Speak is selected the tile it came from is long gone.
+type SentenceWord = { label: string; speech: string; accent: string }
+
+const BEACON_LABEL: Record<BeaconStatus, string> = {
+  off: 'off',
+  connecting: 'pairing',
+  bluetooth: 'bluetooth',
+  serial: 'usb',
+  error: 'problem',
+}
+
 type Turn = { speaker: 'them' | 'you'; text: string; time: string }
 
 // Shown until the first real turn arrives, so the strip reads as a conversation rather
@@ -173,23 +188,150 @@ let speakingUntil = 0
 let speaking = false
 const ECHO_GRACE_MS = 700
 
+// Chrome collects utterances that nothing holds a reference to, which drops or truncates
+// speech with no error raised. Keeping the in-flight one reachable is the documented
+// workaround, and it doubles as a second signal that the board is mid-sentence.
+let liveUtterance: SpeechSynthesisUtterance | null = null
+let preferredVoice: SpeechSynthesisVoice | null = null
+let speechReporter: ((detail: string) => void) | null = null
+
 function boardIsSpeaking() {
-  return speaking || performance.now() < speakingUntil
+  return speaking || liveUtterance !== null || performance.now() < speakingUntil
 }
 
-function speak(text: string) {
-  if (!text || typeof window === 'undefined' || !('speechSynthesis' in window)) return
-  window.speechSynthesis.cancel()
+const VOICE_CHOICE_KEY = 'clearspeak.voice'
+let voiceList: SpeechSynthesisVoice[] = []
+let voicesChangedHandler: (() => void) | null = null
+
+// Voices marked localService run on the machine. The ones that do not are synthesised on
+// a server, so on a congested hall network they fail with no sound and, worse, no error.
+// A speech board cannot depend on wifi, so an on-device voice always wins here.
+function rankVoice(voice: SpeechSynthesisVoice) {
+  const english = /^en(-|$)/i.test(voice.lang)
+  return (voice.localService ? 4 : 0) + (english ? 2 : 0) + (voice.default ? 1 : 0)
+}
+
+function usableVoices() {
+  return voiceList.filter((voice) => /^en(-|$)/i.test(voice.lang)).length > 0
+    ? [...voiceList].sort((a, b) => rankVoice(b) - rankVoice(a))
+    : [...voiceList].sort((a, b) => rankVoice(b) - rankVoice(a))
+}
+
+// Chrome returns an empty list until it has loaded voices asynchronously, so this runs now
+// and again whenever the browser says the list changed.
+function refreshVoices() {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return
+  const available = window.speechSynthesis.getVoices()
+  if (available.length === 0) return
+  voiceList = available
+  let saved: string | null = null
+  try { saved = window.localStorage.getItem(VOICE_CHOICE_KEY) } catch { /* Storage may be disabled. */ }
+  const chosen = saved ? available.find((voice) => voice.name === saved) : null
+  if (chosen) {
+    preferredVoice = chosen
+    return
+  }
+  preferredVoice = usableVoices()[0] ?? null
+}
+
+function chooseVoice(name: string) {
+  const found = voiceList.find((voice) => voice.name === name)
+  if (!found) return
+  preferredVoice = found
+  try { window.localStorage.setItem(VOICE_CHOICE_KEY, name) } catch { /* Voice still works without persistence. */ }
+}
+
+if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+  refreshVoices()
+  voicesChangedHandler = refreshVoices
+  window.speechSynthesis.addEventListener('voiceschanged', voicesChangedHandler)
+}
+
+// Chrome will not produce audio until the page has been interacted with at least once.
+// Dwell selection is driven by a timer, not a gesture, so the very first thing spoken
+// after calibration can be swallowed. Sending a silent utterance on the first real click
+// or key press opens the audio path before it is needed.
+let audioUnlocked = false
+function unlockAudio() {
+  if (audioUnlocked || typeof window === 'undefined' || !('speechSynthesis' in window)) return
+  audioUnlocked = true
+  refreshVoices()
+  const primer = new SpeechSynthesisUtterance(' ')
+  primer.volume = 0
+  window.speechSynthesis.speak(primer)
+}
+
+function speakWith(text: string, voice: SpeechSynthesisVoice | null, onDead: (() => void) | null) {
+  const synth = window.speechSynthesis
   const utterance = new SpeechSynthesisUtterance(text)
+  if (voice) utterance.voice = voice
   utterance.rate = 0.95
+  utterance.volume = 1
+  utterance.lang = voice?.lang ?? 'en-US'
+  liveUtterance = utterance
+
+  let started = false
   speaking = true
   const release = () => {
     speaking = false
     speakingUntil = performance.now() + ECHO_GRACE_MS
+    liveUtterance = null
   }
+  utterance.onstart = () => { started = true }
   utterance.onend = release
-  utterance.onerror = release
-  window.speechSynthesis.speak(utterance)
+  utterance.onerror = (event) => {
+    release()
+    // Cancelling the previous sentence to start this one is not a fault worth reporting.
+    if (!event.error || event.error === 'interrupted' || event.error === 'canceled') return
+    if (onDead) onDead()
+    else speechReporter?.(`The browser voice failed: ${event.error}`)
+  }
+
+  if (synth.paused) synth.resume()
+  synth.speak(utterance)
+
+  // A network voice on a bad connection never starts and never errors; it just goes quiet.
+  // If nothing has begun by now, fall back to an on-device voice.
+  if (onDead) {
+    window.setTimeout(() => {
+      if (!started && !synth.speaking) {
+        synth.cancel()
+        onDead()
+      }
+    }, 900)
+  }
+}
+
+function browserSpeak(text: string) {
+  if (!text || typeof window === 'undefined' || !('speechSynthesis' in window)) return
+  const synth = window.speechSynthesis
+  if (!preferredVoice) refreshVoices()
+  const local = voiceList.find((voice) => voice.localService && /^en(-|$)/i.test(voice.lang)) ?? null
+
+  const go = () => {
+    const first = preferredVoice
+    const needsBackstop = Boolean(local) && local !== first
+    speakWith(text, first, needsBackstop ? () => {
+      preferredVoice = local
+      speechReporter?.(`Switched to the on-device voice ${local?.name}. The previous one needed the internet.`)
+      speakWith(text, local, null)
+    } : null)
+  }
+
+  // Cancelling and speaking in the same tick makes Chrome drop the new utterance.
+  if (synth.speaking || synth.pending) {
+    synth.cancel()
+    window.setTimeout(go, 70)
+    return
+  }
+  go()
+}
+
+// Speak on the device using the board, including phones and tablets.
+function speak(text: string) {
+  if (!text || typeof window === 'undefined') return
+  if (speechAvailable()) browserSpeak(text)
+  else speechReporter?.('Speech output is unavailable in this browser. Your sentence remains visible.')
 }
 
 function speechAvailable() {
@@ -225,11 +367,15 @@ function App() {
   const recenterAtRef = useRef(0)
   const lastFaceRef = useRef(0)
   const [positioning, setPositioning] = useState(false)
+  const [welcomeOpen, setWelcomeOpen] = useState(true)
   const [guideOpen, setGuideOpen] = useState(true)
   const guideOpenRef = useRef(true)
-  guideOpenRef.current = guideOpen
-  const [panelTab, setPanelTab] = useState<'talk' | 'tracking' | 'details'>('talk')
-  const [aiEnabled, setAiEnabled] = useState(true)
+  const [pointerPaused, setPointerPaused] = useState(false)
+  const [largeText, setLargeText] = useState(false)
+  const [highContrast, setHighContrast] = useState(false)
+  const [reduceMotion, setReduceMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+  guideOpenRef.current = guideOpen || welcomeOpen || pointerPaused
+    const [aiEnabled, setAiEnabled] = useState(true)
   const [aiStatus, setAiStatus] = useState('Checking OpenAI…')
   const aiEnabledRef = useRef(true)
   const suggestionRequestRef = useRef<AbortController | null>(null)
@@ -316,11 +462,10 @@ function App() {
   const suggestedAtRef = useRef(0)
   // Picks and seconds from the question being heard to the answer being spoken. This is
   // the number the whole feature exists to move.
-  const [answerStat, setAnswerStat] = useState<{ seconds: number; picks: number } | null>(null)
+  const [, setAnswerStat] = useState<{ seconds: number; picks: number } | null>(null)
   const askedAtRef = useRef(0)
   const picksRef = useRef(0)
   const [listenError, setListenError] = useState('')
-  const showDetails = panelTab === 'details'
   const [gesturesOn, setGesturesOn] = useState(true)
   const gesturesOnRef = useRef(true)
   const gestureRef = useRef(createGestureDetector())
@@ -332,18 +477,51 @@ function App() {
   // real turn clears it rather than appending to fiction.
   const liveRef = useRef(false)
   const [boardId, setBoardId] = useState('home')
-  // The last thing the board said out loud. Kept on screen because rooms are noisy and
-  // synthetic speech is easy to mishear, so the person listening can read it back.
-  const [spoken, setSpoken] = useState('')
-  const [typed, setTyped] = useState('')
-  const [events, setEvents] = useState<SelectionEvent[]>([])
+  // Silent speech is the one failure the person using this board cannot detect for
+  // themselves, so anything the synthesiser reports has to reach the screen.
+  const [speechNote, setSpeechNote] = useState('')
+  const [sentence, setSentence] = useState<SentenceWord[]>([])
+  // Selection runs from a timer, not a click, so the handler is not re-created per
+  // keystroke and cannot close over fresh state. The ref is how it reads the sentence.
+  const sentenceRef = useRef<SentenceWord[]>([])
+  sentenceRef.current = sentence
+
+  const [voiceNames, setVoiceNames] = useState<string[]>([])
+  const [voiceName, setVoiceName] = useState('')
+
+  useEffect(() => {
+    speechReporter = setSpeechNote
+    const sync = () => {
+      refreshVoices()
+      setVoiceNames(usableVoices().map((voice) => `${voice.name}${voice.localService ? '' : ' (needs internet)'}`))
+      setVoiceName(preferredVoice?.name ?? '')
+    }
+    sync()
+    window.speechSynthesis?.addEventListener('voiceschanged', sync)
+    // The first gesture of the session opens the audio path for later dwell selections,
+    // which are timer-driven and carry no user activation of their own.
+    const prime = () => unlockAudio()
+    window.addEventListener('pointerdown', prime, { once: true })
+    window.addEventListener('keydown', prime, { once: true })
+    return () => {
+      speechReporter = null
+      window.speechSynthesis?.removeEventListener('voiceschanged', sync)
+      window.removeEventListener('pointerdown', prime)
+      window.removeEventListener('keydown', prime)
+    }
+  }, [])
+
+  // Deleting is two steps on purpose. One step would mean a stray dwell on the way to a
+  // word could silently eat the sentence someone spent a minute building.
+  const [deleteMode, setDeleteMode] = useState(false)
+  const [, setEvents] = useState<SelectionEvent[]>([])
   const eventIdRef = useRef(0)
   // Head pose when the current dot appeared, and whether the head has since travelled
   // far enough for stillness to mean it arrived rather than never left.
   const settleOriginRef = useRef<{ yaw: number; pitch: number } | null>(null)
   const movedRef = useRef(false)
   const [message, setMessage] = useState('Enable the camera to begin.')
-  const [blinkSelect, setBlinkSelect] = useState(false)
+  const [blinkSelect] = useState(false)
   const [stability, setStability] = useState<StabilityKey>('balanced')
   const [capabilities, setCapabilities] = useState({
     face: false,
@@ -352,8 +530,17 @@ function App() {
     headPose: false,
     blendshapes: false,
   })
-  const [debug, setDebug] = useState({ target: 'none', tracking: 'waiting', blinking: false, gaze: '—', distance: 0 })
-  const [stats, setStats] = useState({ selections: 0 })
+  const [, setDebug] = useState({ target: 'none', tracking: 'waiting', blinking: false, gaze: '—', distance: 0 })
+  const [, setStats] = useState({ selections: 0 })
+  const [beacon, setBeacon] = useState<{ status: BeaconStatus; detail: string }>({
+    status: 'off',
+    detail: 'Not connected. The board works without it.',
+  })
+  const beaconRef = useRef<Beacon | null>(null)
+
+  if (!beaconRef.current) {
+    beaconRef.current = createBeacon((status, detail) => setBeacon({ status, detail }))
+  }
 
   // Only counts once per question: the interesting figure is how much work the first
   // answer took, not the total picks in a conversation.
@@ -372,31 +559,7 @@ function App() {
     setTurns((current) => [...(fresh ? [] : current), { speaker, text: trimmed, time: clockTime() }].slice(-40))
   }, [])
 
-  // Everything a selection does when it speaks, minus the selection. Shared so typed
-  // speech lands in the transcript, the sentence bar and the answer timing the same way a
-  // tile does - a sentence the board said is a sentence the board said, however it got there.
-  const sayAloud = useCallback(
-    (text: string) => {
-      const trimmed = text.trim()
-      if (!trimmed) return
-      speak(trimmed)
-      setSpoken(trimmed)
-      recordTurn('you', trimmed)
-      picksRef.current += 1
-      recordAnswer()
-      setEvents((current) => [{ id: eventIdRef.current++, name: trimmed, time: clockTime() }, ...current].slice(0, 6))
-      setStats((current) => ({ ...current, selections: current.selections + 1 }))
-      setMessage(`Said "${trimmed}"`)
-    },
-    [recordTurn, recordAnswer],
-  )
 
-  const speakTyped = useCallback(() => {
-    const text = typed.trim() || spoken
-    if (!text) return
-    sayAloud(text)
-    setTyped('')
-  }, [typed, spoken, sayAloud])
 
   useEffect(() => {
     if (!guideOpen) return
@@ -572,14 +735,64 @@ function App() {
       return
     }
 
-    // Everything that is not navigation is speech, and it goes out immediately.
-    speak(phrase)
-    setSpoken(phrase)
-    recordTurn('you', phrase)
-    recordAnswer()
-    setStats((current) => ({ ...current, selections: current.selections + 1 }))
-    setMessage(`Said "${phrase}"`)
-  }, [recordTurn, recordAnswer, cancelSuggestions])
+    // Saying the finished sentence. Everything the old per-word path did happens here
+    // instead, once, for the whole thing.
+    // Speaking is a side effect and therefore belongs nowhere near a state updater;
+    // React invokes those more than once and at a time of its choosing.
+    if (action === 'say') {
+      const words = sentenceRef.current
+      if (words.length === 0) {
+        setMessage('Choose some words first')
+        return
+      }
+      const phrase = words.map((word) => word.speech).join(' ')
+      speak(phrase)
+      recordTurn('you', phrase)
+      recordAnswer()
+      setStats((stat) => ({ ...stat, selections: stat.selections + 1 }))
+      setMessage(`Said "${phrase}"`)
+
+      // Help and pain get the alarm pattern; everything else gets the quieter one. The
+      // distinction is the whole value of the light. A beacon that looks the same for
+      // "I am in pain" and "can I have some water" is a beacon people learn to ignore.
+      beaconRef.current?.send(words.some((word) => word.accent === 'urgent') ? URGENT : REQUEST)
+      setSentence([])
+      setDeleteMode(false)
+      return
+    }
+
+    if (action === 'delete') {
+      if (!deleteMode && sentenceRef.current.length === 0) {
+        setMessage('Nothing to delete yet')
+        return
+      }
+      setDeleteMode((current) => !current)
+      setMessage(deleteMode ? 'Back to the words' : 'Choose the word to remove')
+      return
+    }
+
+    // A word chosen while deleting. Index rather than label, because the same word can
+    // legitimately appear twice in one sentence and only one of them is the target.
+    if (action === 'unsay') {
+      const index = Number(element.dataset.dwellIndex)
+      const removed = sentenceRef.current[index]
+      const remaining = sentenceRef.current.filter((_, position) => position !== index)
+      setSentence(remaining)
+      // Nothing left to point at, so staying in delete mode would strand the person on an
+      // empty screen with no obvious way back.
+      if (remaining.length === 0) setDeleteMode(false)
+      setMessage(removed ? `Removed "${removed.label}"` : 'Removed')
+      return
+    }
+
+    // An ordinary word. It joins the sentence and waits; nothing is spoken until Speak.
+    setDeleteMode(false)
+    setSentence((current) => [
+      ...current,
+      { label, speech: phrase, accent: element.dataset.dwellAccent ?? 'word' },
+    ])
+    setMessage(`Added "${label}"`)
+  }, [recordTurn, recordAnswer, cancelSuggestions, deleteMode])
 
   // Nod and shake answer without having to aim at anything, which matters most for the two
   // words people need fastest. The head sweeps across the board during the movement, so
@@ -865,7 +1078,7 @@ function App() {
           gestureRef.current.reset()
         }
 
-        if (blinkSelectRef.current && modeRef.current === 'live') {
+        if (blinkSelectRef.current && modeRef.current === 'live' && !guideOpenRef.current) {
           if (signals.blinking && !blinkFiredRef.current && dwellRef.current.progress > BLINK_SELECT_MS / DWELL_MS) {
             const target = rectsRef.current.find((entry) => entry.element.dataset.dwellTarget === dwellRef.current.target)
             if (target && now >= cooldownUntilRef.current) commitSelection(target.element)
@@ -1276,7 +1489,7 @@ function App() {
       window.removeEventListener('resize', onResize)
       window.removeEventListener('scroll', onResize, true)
     }
-  }, [refreshRects, boardId, stage, suggested, guideOpen])
+  }, [refreshRects, boardId, stage, suggested, guideOpen, sentence, deleteMode, welcomeOpen])
 
   useEffect(() => {
     const onRotate = () => {
@@ -1355,6 +1568,7 @@ function App() {
       data-dwell-action={tile.restore ? 'restore' : tile.goTo ? 'folder' : 'speak'}
       data-dwell-board={tile.goTo ?? ''}
       data-dwell-speech={tile.speech ?? tile.label}
+      data-dwell-accent={tile.accent ?? 'word'}
       className={`dwell-target tile-${tile.accent ?? 'word'}`}
       // Head pointing is the point, but a tile that cannot also be pressed is a tile
       // nobody can help you with. A carer leaning over the bed, a visitor being shown how
@@ -1365,12 +1579,61 @@ function App() {
     </button>
   )
 
+  const beaconLive = beacon.status === 'bluetooth' || beacon.status === 'serial'
+
   return (
-    <main className="app-shell">
+    <main className={`app-shell ${largeText ? 'large-text' : ''} ${highContrast ? 'high-contrast' : ''} ${reduceMotion ? 'reduce-motion' : ''}`}>
+      {welcomeOpen && (
+        <div className="welcome-overlay" role="dialog" aria-label="Welcome to ClearSpeak">
+          <div className="welcome-card">
+            <div className="welcome-glow" aria-hidden="true" />
+            <p className="welcome-eyebrow">CLEARSPEAK</p>
+            <h2 className="welcome-title">Normalize Living for Those Without</h2>
+            <p className="welcome-sub">
+              Communicate with head movement, touch, or a keyboard. Choose your words and speak on your terms.
+            </p>
+            <div className="welcome-steps">
+              <div className="welcome-step">
+                <span className="welcome-step-num">1</span>
+                <div>
+                  <strong>Enable your camera</strong>
+                  <p>Allow access when your browser asks. Camera images stay on this device.</p>
+                </div>
+              </div>
+              <div className="welcome-step">
+                <span className="welcome-step-num">2</span>
+                <div>
+                  <strong>Calibrate</strong>
+                  <p>Turn your head toward each gold dot. About a minute, sixteen dots.</p>
+                </div>
+              </div>
+              <div className="welcome-step">
+                <span className="welcome-step-num">3</span>
+                <div>
+                  <strong>Speak</strong>
+                  <p>Move your head to a word and hold to add it. Choose Speak to read your sentence aloud.</p>
+                </div>
+              </div>
+            </div>
+            <button
+              className="primary-button welcome-start"
+              onClick={() => { setWelcomeOpen(false); setGuideOpen(true) }}
+            >
+              Begin
+            </button>
+            <button
+              className="welcome-skip"
+              onClick={() => { setWelcomeOpen(false); setGuideOpen(false); skipCalibration() }}
+            >
+              Skip straight to the board
+            </button>
+          </div>
+        </div>
+      )}
       <header className="topbar">
         <div>
-          <p className="eyebrow">CLEARSPEAK / HEAD POINTING</p>
-          <h1>Head-pointing speech board</h1>
+          <p className="eyebrow">CLEARSPEAK / ASSISTIVE COMMUNICATION</p>
+          <h1>Normalize Living for Those Without</h1>
         </div>
         <div className="header-actions">
           <button className="guide-help" onClick={() => setGuideOpen(value => !value)} aria-expanded={guideOpen} disabled={collecting || stage === 'fitting'}>How to calibrate</button>
@@ -1409,9 +1672,90 @@ function App() {
                 <span className="guide-arrow" aria-hidden="true">↓</span>
                 <span>{cameraState === 'ready' ? 'Camera ready. Start here.' : cameraState === 'starting' ? 'Allow the camera, then we’ll begin.' : 'First, turn on your camera.'}</span>
               </div>
+              {collecting && (
+                <div className="progress-track guide-progress">
+                  <span style={{ width: `${progress * 100}%` }} />
+                </div>
+              )}
               <button className="primary-button guide-start" onClick={cameraPaused ? resumeCamera : cameraState === 'ready' ? startCalibration : startCamera} disabled={cameraState === 'starting'}>
                 {cameraPaused ? 'Resume camera' : cameraState === 'ready' ? 'Start calibration' : cameraState === 'starting' ? 'Starting camera…' : 'Enable camera'}
               </button>
+              {cameraError && <p className="error-text" role="alert">{cameraError}</p>}
+              {advice && <p className="panel-copy tight warn">{advice}</p>}
+              {!speechAvailable() && (
+                <p className="panel-copy tight warn">This browser has no speech voice. Chrome or Edge will work.</p>
+              )}
+              {speechNote && <p className="panel-copy tight warn">{speechNote}</p>}
+              {voiceNames.length > 0 && (
+                <label className="voice-pick">
+                  <span>Voice</span>
+                  <select
+                    value={voiceName}
+                    onChange={(event) => {
+                      const picked = event.target.value
+                      setVoiceName(picked)
+                      chooseVoice(picked)
+                      setSpeechNote('')
+                      speak('This is the voice the board will use.')
+                    }}
+                  >
+                    {voiceNames.map((label) => {
+                      const name = label.replace(' (needs internet)', '')
+                      return <option key={name} value={name}>{label}</option>
+                    })}
+                  </select>
+                </label>
+              )}
+
+              {/* Everything below is optional, and the board is fully usable without any of
+                  it. It lives here because this is the one screen someone reads before they
+                  start talking, and a control you meet mid-sentence is a control you miss. */}
+              <div className="guide-extras">
+                <div className="guide-extra-row">
+                  <span className="guide-extra-label">Caregiver beacon</span>
+                  <span className={beaconLive ? 'ok' : beacon.status === 'error' ? 'warn' : ''}>{BEACON_LABEL[beacon.status]}</span>
+                </div>
+                <div className="button-row">
+                  <button
+                    className="secondary-button"
+                    onClick={() => beaconRef.current?.connectBluetooth()}
+                    disabled={!bluetoothAvailable() || beaconLive || beacon.status === 'connecting'}
+                  >
+                    Pair over Bluetooth
+                  </button>
+                  <button
+                    className="secondary-button"
+                    onClick={() => beaconRef.current?.connectSerial()}
+                    disabled={!serialAvailable() || beaconLive || beacon.status === 'connecting'}
+                  >
+                    USB
+                  </button>
+                </div>
+                {beaconLive && (
+                  <div className="button-row">
+                    <button className="text-button" onClick={() => beaconRef.current?.test()}>Test the alarm</button>
+                    <button className="text-button" onClick={() => beaconRef.current?.disconnect()}>Disconnect</button>
+                  </div>
+                )}
+                <p className={`panel-copy tight ${beacon.status === 'error' ? 'warn' : 'muted'}`}>{beacon.detail}</p>
+
+                <div className="button-row guide-extra-buttons">
+                  <button
+                    className="text-button"
+                    onClick={() => { setSpeechNote(''); speak('This is the voice the board will use.') }}
+                    disabled={!speechAvailable()}
+                  >
+                    Test the voice
+                  </button>
+                  <button className="text-button" onClick={resetPosition} disabled={cameraState !== 'ready' || cameraPaused || collecting || positioning}>
+                    {positioning ? 'Look at the board centre…' : 'Reset pointing position'}
+                  </button>
+                  <button className="text-button" onClick={stopCamera} disabled={cameraState !== 'ready' && cameraState !== 'starting'}>
+                    Stop camera
+                  </button>
+                </div>
+              </div>
+
               <button className="guide-skip" onClick={skipCalibration}>Use the word board without calibrating</button>
             </section>
           )}
@@ -1435,7 +1779,7 @@ function App() {
                 <strong>{cameraPaused ? 'Resume the camera to continue' : !capabilities.face ? 'Keep your face visible to the camera' : phase === 'record' ? 'Hold still — recording your position' : 'Turn your head toward the gold dot'}</strong>
                 <span>{phase === 'record' ? 'Wait here until the dot moves.' : 'Move your head, not just your eyes. The white pointer is still learning.'}</span>
               </div>
-              {stage === 'calibrating' && showDetails && (
+              {stage === 'calibrating' && (
                 <div className={`turn-meter ${liveTurn.yaw > 10 && liveTurn.pitch > 6 ? 'ok' : 'low'}`}>
                   <strong>
                     turned {liveTurn.yaw.toFixed(0)}° across · {liveTurn.pitch.toFixed(0)}° down
@@ -1456,19 +1800,79 @@ function App() {
 
           {boardReady && !guideOpen && (
             <>
-              {/* Display only. Controls used to live here as small buttons a few pixels
-                  apart, which quietly set the accuracy budget for the whole board to under
-                  4% of the screen. They are full-size tiles in the grid now. */}
-              <div className={`sentence-bar${spoken ? ' said' : ''}`}>
-                <span>{spoken || 'What you say will appear here'}</span>
+              {/* Speak and Delete are dwell targets like any word, because a board you can
+                  drive with your head right up until the moment you want to say something
+                  is not a board you can drive with your head. */}
+              <div className={`sentence-bar${sentence.length ? ' composing' : ''}${deleteMode ? ' deleting' : ''}`}>
+                {/* Read-only. Deleting happens on the big grid below, where the targets
+                    are far enough apart to actually aim at. */}
+                <div className="sentence-words">
+                  {sentence.length === 0 ? (
+                    <span className="sentence-placeholder">Choose words, then Speak</span>
+                  ) : (
+                    sentence.map((word, index) => (
+                      <span className={`sentence-word${deleteMode ? ' dimmed' : ''}`} key={`${word.label}-${index}`}>
+                        {word.label}
+                      </span>
+                    ))
+                  )}
+                </div>
+                <button
+                  className="sentence-control delete dwell-target"
+                  data-dwell-target="Delete"
+                  data-dwell-action="delete"
+                  aria-pressed={deleteMode}
+                  onClick={(event) => commitSelection(event.currentTarget)}
+                >
+                  {deleteMode ? 'Done' : 'Delete'}
+                </button>
+                <button
+                  className="sentence-control say dwell-target"
+                  data-dwell-target="Speak"
+                  data-dwell-action="say"
+                  onClick={(event) => commitSelection(event.currentTarget)}
+                >
+                  Speak
+                </button>
               </div>
               {/* Two rows of six, not three rows of four. Vertical gaze is roughly half
                   as accurate as horizontal, so rows are the expensive axis to add and
                   columns are the cheap one. Dropping to two rows takes the vertical
                   tolerance from 11.7% of the stage to 17.5% at no cost in vocabulary. */}
-              <div className="board-grid">
-                {TOP_ROW.map((tile) => renderTile(tile, `top-${tile.label}`))}
-                {boardTiles.map((tile) => renderTile(tile, `${board.id}-${tile.label}`))}
+              {/* Deleting reuses the board's own geometry rather than inventing smaller
+                  controls. The accuracy budget is half the gap between target centres, so
+                  a row of little chips in the sentence bar was unaimable by design - the
+                  words have to become full tiles to be selectable by head at all. */}
+              <div className={`board-grid${deleteMode ? ' removing' : ''}`}>
+                {deleteMode ? (
+                  <>
+                    {sentence.map((word, index) => (
+                      <button
+                        key={`remove-${word.label}-${index}`}
+                        className="dwell-target tile-remove"
+                        data-dwell-target={`remove-${index}`}
+                        data-dwell-action="unsay"
+                        data-dwell-index={index}
+                        onClick={(event) => commitSelection(event.currentTarget)}
+                      >
+                        {word.label}
+                      </button>
+                    ))}
+                    <button
+                      className="dwell-target tile-folder"
+                      data-dwell-target="Done deleting"
+                      data-dwell-action="delete"
+                      onClick={(event) => commitSelection(event.currentTarget)}
+                    >
+                      Done
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    {TOP_ROW.map((tile) => renderTile(tile, `top-${tile.label}`))}
+                    {boardTiles.map((tile) => renderTile(tile, `${board.id}-${tile.label}`))}
+                  </>
+                )}
               </div>
               <div className="rest-zone left" ref={restLeftRef}>
                 REST ZONE
@@ -1497,288 +1901,60 @@ function App() {
           </div>
         </div>
 
-        <aside className="control-panel" aria-label="Controls">
-          <nav className="control-tabs" aria-label="Control pages">
-            {(['talk', 'tracking', 'details'] as const).map(tab => <button key={tab} aria-pressed={panelTab === tab} onClick={() => setPanelTab(tab)}>{tab === 'talk' ? 'Talk' : tab === 'tracking' ? 'Tracking' : 'Details'}</button>)}
-          </nav>
-          <div className="camera-controls panel-section">
-            <div className="button-row">
-              <button className="primary-button" onClick={cameraPaused ? resumeCamera : startCamera} disabled={cameraState === 'starting' || (cameraState === 'ready' && !cameraPaused)}>{cameraPaused ? 'Resume camera' : cameraState === 'starting' ? 'Starting…' : cameraState === 'ready' ? 'Camera on' : 'Enable camera'}</button>
-              <button className="secondary-button stop-button" onClick={stopCamera} disabled={cameraState !== 'ready' && cameraState !== 'starting'}>Stop camera</button>
-            </div>
-            {cameraError && <p className="error-text" role="alert">{cameraError}</p>}
+        <aside className="access-panel" aria-label="Accessibility and camera controls">
+          <div className="access-intro"><p className="section-kicker">Made for you</p><h2>Comfort & control</h2><p>Point, tap, or use Tab and Enter. Build a sentence, then choose Speak.</p></div>
+          <div className="camera-actions">
+            <button className="secondary-button" onClick={cameraState === 'ready' && cameraPaused ? resumeCamera : startCamera} disabled={cameraState === 'starting' || (cameraState === 'ready' && !cameraPaused)}>{cameraPaused ? 'Resume camera' : 'Enable camera'}</button>
+            <button className="secondary-button camera-stop" onClick={stopCamera} disabled={cameraState !== 'ready' && cameraState !== 'starting'}>Turn off camera</button>
+            <button className="secondary-button" aria-pressed={pointerPaused} onClick={() => {
+              setPointerPaused(value => !value)
+              dwellRef.current = { target: '', progress: 0 }; dwellScoresRef.current.clear()
+              gestureRef.current.reset()
+              highlightRef.current?.classList.remove('dwell-near')
+              highlightRef.current?.style.setProperty('--dwell', '0%')
+            }}>{pointerPaused ? 'Resume pointing' : 'Pause pointing'}</button>
+            <button className="secondary-button" onClick={resetPosition} disabled={cameraState !== 'ready' || cameraPaused || collecting || positioning}>Reset position</button>
           </div>
-          <div className={`control-page page-${panelTab}`}>
-
-
-          <div className="panel-section setup-section">
-            <div className="section-heading">
-              <p className="section-kicker">your pointing position</p>
-              <span>{collecting ? `${pointIndex + 1} / ${points.length}` : stage}</span>
-            </div>
-            <p className="panel-copy">
-              Sit where you are comfortable; keep your face visible. Turn toward each dot, then pause. You do not need to be centred in the camera.
-            </p>
-            <div className="progress-track">
-              <span style={{ width: `${progress * 100}%` }} />
-            </div>
-            <div className="button-row">
-              <button className="secondary-button" onClick={startCalibration} disabled={collecting || cameraState !== 'ready' || cameraPaused}>
-                {quality ? 'Calibrate again' : `Calibrate · ${CALIBRATION_POINTS.length} dots`}
-              </button>
-              <button className="text-button" onClick={skipCalibration}>
-                Skip
-              </button>
-            </div>
-            <button className="secondary-button reset-position" onClick={resetPosition} disabled={cameraState !== 'ready' || cameraPaused || collecting || positioning}>
-              {positioning ? 'Look at the board centre…' : 'Reset pointing position'}
-            </button>
-            {quality && !collecting && panelTab === 'tracking' && (
-              <div className={`result ${grade}`}>
-                <strong>{grade === 'good' ? 'Good' : grade === 'usable' ? 'Usable' : 'Rough'}</strong>
-                <span>lands within {quality.measured.toFixed(1)}% of the word you aim at</span>
-              </div>
-            )}
-            {advice && panelTab === 'tracking' && <p className="panel-copy tight warn">{advice}</p>}
+          <p className="access-status" role="status">{pointerPaused ? 'Pointing paused. Touch and keyboard still work.' : 'Hold on a word to select. Rest at either edge.'}</p>
+          <div className="access-options">
+            <label><input type="checkbox" checked={largeText} onChange={e => setLargeText(e.target.checked)} />Larger text</label>
+            <label><input type="checkbox" checked={highContrast} onChange={e => setHighContrast(e.target.checked)} />High contrast</label>
+            <label><input type="checkbox" checked={reduceMotion} onChange={e => setReduceMotion(e.target.checked)} />Reduce motion</label>
+            <label><input type="checkbox" checked={gesturesOn} onChange={e => setGesturesOn(e.target.checked)} />Nod / shake replies</label>
           </div>
+          <label className="access-select">Pointer steadiness<select value={stability} onChange={e => setStability(e.target.value as StabilityKey)}>{Object.keys(STABILITY_PRESETS).map(key => <option key={key} value={key}>{key}</option>)}</select></label>
+          <div className="ai-controls"><label><input type="checkbox" checked={aiEnabled} onChange={e => setAiEnabled(e.target.checked)} />OpenAI reply suggestions</label><p role="status">{aiStatus}</p><small>When enabled, transcribed text and recent conversation are sent to OpenAI for relevant replies. Your API key stays on the server.</small></div>
+        </aside>
 
-          <div className="panel-section subtitle-panel talk-section">
-            <div className="section-heading">
-              <p className="section-kicker">what they said</p>
-              <span className={listening ? 'ok' : ''}>{listening ? 'listening' : 'off'}</span>
-            </div>
-            <div className="subtitle-feed" aria-live="polite">
-              {caption ? (
-                <p className="caption-live interim">{caption}</p>
-              ) : lastHeard ? (
-                <p className="caption-live">{lastHeard}</p>
-              ) : (
-                <p className="caption-idle">
-                  {listening ? 'Listening.' : 'Captions anyone talking near the computer, so you can read what you missed.'}
-                </p>
-              )}
-            </div>
+        <aside className="transcript-rail" aria-label="What they said">
+          <div className="transcript-head">
+            <p className="section-kicker">what they said</p>
             <button
-              className="secondary-button"
+              className="transcript-toggle"
               onClick={() => setListening((current) => !current)}
               disabled={!recognitionAvailable()}
             >
-              {listening ? 'Stop listening' : 'Start listening'}
+              {listening ? 'Stop' : 'Listen'}
             </button>
-            {listenError ? (
-              <p className="panel-copy tight warn">{listenError}</p>
-            ) : !recognitionAvailable() ? (
-              <p className="panel-copy tight warn">This browser cannot do captions. Chrome or Edge will work.</p>
-            ) : null}
           </div>
-
-          <div className="panel-section talk-section">
-            <div className="section-heading">
-              <p className="section-kicker">say something</p>
-              <span className={speechAvailable() ? 'ok' : ''}>{speechAvailable() ? 'voice ready' : 'no voice'}</span>
-            </div>
-            <p className="panel-copy">
-              Type a phrase to speak, or repeat the last thing said.
-            </p>
-            <input
-              className="say-input" aria-label="Phrase to speak"
-              value={typed}
-              placeholder="Type anything to say out loud"
-              onChange={(event) => setTyped(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') speakTyped()
-              }}
-            />
-            <button
-              className="secondary-button"
-              onClick={speakTyped}
-              disabled={!speechAvailable() || (!typed.trim() && !spoken)}
-            >
-              {typed.trim() ? 'Speak' : 'Say it again'}
-            </button>
-            {!speechAvailable() && (
-              <p className="panel-copy tight warn">This browser has no speech voice. Chrome or Edge will work.</p>
-            )}
-          </div>
-
-          <div className="panel-section talk-section">
-            <div className="section-heading">
-              <p className="section-kicker">suggested answers</p>
-              <span className={suggested ? 'ok' : ''}>{suggested ? 'showing' : 'waiting'}</span>
-            </div>
-            <p className="panel-copy">
-              Replies to questions and statements. Choose a tile to speak; nothing is said automatically.
-            </p>
-            <label className="toggle-row"><input type="checkbox" checked={aiEnabled} onChange={event => setAiEnabled(event.target.checked)} />Use OpenAI suggestions</label>
-            <p className="panel-copy tight" role="status">{aiStatus}</p>
-            <p className="privacy-note">When enabled, recent transcript text is sent to OpenAI for reply options.</p>
-            {suggested && <p className="panel-copy tight">{suggested.because}</p>}
-            {answerStat && panelTab === 'details' && (
-              <div className="result good">
-                <strong>
-                  {answerStat.picks} {answerStat.picks === 1 ? 'pick' : 'picks'}
-                </strong>
-                <span>to answer, {answerStat.seconds.toFixed(1)} s after the question</span>
-              </div>
-            )}
-          </div>
-
-          <div className="panel-section tracking-section">
-            <p className="section-kicker">shortcuts</p>
-            <label className="toggle-row">
-              <input type="checkbox" checked={gesturesOn} onChange={(event) => setGesturesOn(event.target.checked)} />
-              Nod for yes, shake for no
-            </label>
-            <label className="toggle-row">
-              <input type="checkbox" checked={blinkSelect} onChange={(event) => setBlinkSelect(event.target.checked)} />
-              Long blink picks the word you are on
-            </label>
-          </div>
-
-          <div className="panel-section tracking-section">
-            <div className="section-heading">
-              <p className="section-kicker">pointer steadiness</p>
-              <span>{STABILITY_PRESETS[stability].label}</span>
-            </div>
-            <p className="panel-copy">Steadier is easier to aim with but slower to follow you.</p>
-            <div className="segmented">
-              {(Object.keys(STABILITY_PRESETS) as StabilityKey[]).map((key) => (
-                <button key={key} className={key === stability ? 'active' : ''} onClick={() => setStability(key)}>
-                  {STABILITY_PRESETS[key].label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-
-
-          {showDetails && cameraState === 'ready' && (
-            <div className="panel-section">
-              <p className="section-kicker">what the tracker sees</p>
-              <canvas ref={eyePreviewRef} className="eye-preview" width={200} height={60} />
-              <div className="signal-grid">
-                <span className={capabilities.face ? 'ok' : 'warn'}>{capabilities.face ? '✓' : '✕'} face outline</span>
-                <span className={capabilities.eyes ? 'ok' : 'warn'}>{capabilities.eyes ? '✓' : '✕'} eye crop</span>
-                <span className={capabilities.eyeModel ? 'ok' : 'warn'}>{capabilities.eyeModel ? '✓' : '✕'} 3D eyeball</span>
-                <span className={capabilities.headPose ? 'ok' : 'warn'}>{capabilities.headPose ? '✓' : '✕'} 3D head pose</span>
-                <span className={capabilities.blendshapes ? 'ok' : 'warn'}>
-                  {capabilities.blendshapes ? '✓' : '✕'} up/down estimate
-                </span>
-              </div>
-            </div>
-          )}
-
-          {showDetails && movement && (
-            <div className={`panel-section signal-report ${movement.enough ? 'good' : 'dead'}`}>
-              <div className="section-heading">
-                <p className="section-kicker">head movement</p>
-                <span>{movement.enough ? 'enough' : 'too small'}</span>
-              </div>
-              <dl className="telemetry">
-                <div>
-                  <dt>turned across / down</dt>
-                  <dd>{movement.yawDeg.toFixed(0)}° / {movement.pitchDeg.toFixed(0)}°</dd>
-                </div>
-              </dl>
-              <p className="panel-copy tight">
-                {movement.enough
-                  ? 'Plenty of range to map the board onto.'
-                  : `Your head barely moved between dots, so the drift your neck makes anyway is as large as the signal. Aim for about 20° across and 12° down — recalibrate and physically turn to face each dot instead of glancing at it.`}
-              </p>
-            </div>
-          )}
-
-          {showDetails && signal && (
-            <div className={`panel-section signal-report ${signal.verdict}`}>
-              <div className="section-heading">
-                <p className="section-kicker">signal quality</p>
-                <span>{signal.verdict}</span>
-              </div>
-              <dl className="telemetry">
-                <div>
-                  <dt>tracks target (x / y)</dt>
-                  <dd>{signal.correlationX.toFixed(2)} / {signal.correlationY.toFixed(2)}</dd>
-                </div>
-                <div>
-                  <dt>signal vs noise</dt>
-                  <dd>{signal.separationX.toFixed(1)}× / {signal.separationY.toFixed(1)}×</dd>
-                </div>
-              </dl>
-              <p className="panel-copy tight">
-                {signal.verdict === 'good'
-                  ? 'Tracking cleanly across the whole board.'
-                  : signal.verdict === 'weak'
-                    ? 'Tracking, but noisier than it should be. Turning your head further for each dot gives the model more to work with.'
-                    : 'The cursor barely tracks the dots. The most common cause is moving only your eyes during calibration instead of turning your head. Recalibrate and aim your nose at each dot.'}
-              </p>
-            </div>
-          )}
-
-          {showDetails && (
-          <div className="panel-section">
-            <div className="section-heading">
-              <p className="section-kicker">telemetry</p>
-              <span className="live-dot" />
-            </div>
-            <dl className="telemetry">
-              <div>
-                <dt>mode</dt>
-                <dd>{debug.tracking}</dd>
-              </div>
-              <div>
-                <dt>holding still</dt>
-                <dd className={grade}>{quality ? `${quality.measured.toFixed(1)}% · ${grade}` : 'uncalibrated'}</dd>
-              </div>
-              <div>
-                <dt>across / down</dt>
-                <dd>{quality ? `${quality.errorX.toFixed(1)}% / ${quality.errorY.toFixed(1)}%` : '—'}</dd>
-              </div>
-              <div>
-                <dt>single frame</dt>
-                <dd>{quality ? `${quality.perFrame.toFixed(1)}%` : '—'}</dd>
-              </div>
-              <div>
-                <dt>camera</dt>
-                <dd className={lowResolution ? 'poor' : ''}>{resolution || '—'}</dd>
-              </div>
-              <div>
-                <dt>gaze angle</dt>
-                <dd>{debug.gaze}</dd>
-              </div>
-              <div>
-                <dt>distance</dt>
-                <dd>{debug.distance ? `${debug.distance.toFixed(0)} cm` : '—'}</dd>
-              </div>
-              <div>
-                <dt>training frames</dt>
-                <dd>{quality ? quality.rows : '—'}</dd>
-              </div>
-              <div>
-                <dt>nearest word</dt>
-                <dd>{debug.target}</dd>
-              </div>
-              <div>
-                <dt>things said</dt>
-                <dd>{stats.selections}</dd>
-              </div>
-            </dl>
-          </div>
-          )}
-
-          <div className="panel-section details-section">
-            <p className="section-kicker">recent picks</p>
-            {events.length === 0 ? (
-              <p className="muted">Nothing said yet.</p>
+          <div className="transcript-feed" aria-live="polite">
+            {caption ? (
+              <p className="caption-live interim">{caption}</p>
+            ) : lastHeard ? (
+              <p className="caption-live">{lastHeard}</p>
             ) : (
-              events.map((event) => (
-                <div className="event-row" key={event.id}>
-                  <span>{event.name}</span>
-                  <time>{event.time}</time>
-                </div>
-              ))
+              <p className="caption-idle">
+                {listening
+                  ? 'Listening.'
+                  : 'Captions anyone talking near the computer, so you can read what you missed.'}
+              </p>
             )}
           </div>
-          </div>
+          {listenError ? (
+            <p className="panel-copy tight warn">{listenError}</p>
+          ) : !recognitionAvailable() ? (
+            <p className="panel-copy tight warn">This browser cannot do captions. Chrome or Edge will work.</p>
+          ) : null}
         </aside>
       </section>
 

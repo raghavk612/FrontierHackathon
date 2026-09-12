@@ -1,0 +1,235 @@
+/* FULL-WIDTH BOARD — sidebar removed, transcription kept as a slim rail.
+   The board is the product; everything that was scaffolding now lives in the
+   setup guide, which is the one screen someone reads before they start talking. */
+
+.workspace { grid-template-columns: minmax(0, 1fr); }
+
+.stage {
+  width: 100%;
+  max-width: none;
+  aspect-ratio: 16 / 9;
+  max-height: calc(100vh - 230px);
+}
+
+/* --- Transcription rail: the only survivor of the old sidebar --- */
+.transcript-rail {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 14px;
+  margin: 12px auto 0;
+  max-width: 1900px;
+  width: 100%;
+  padding: 10px 16px;
+  border: 1px solid rgba(37, 56, 62, .7);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(16, 26, 31, .95), rgba(13, 22, 27, .95));
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, .2);
+}
+
+.transcript-head { display: flex; align-items: center; gap: 10px; }
+.transcript-head .section-kicker { margin: 0; white-space: nowrap; }
+
+.transcript-toggle {
+  background: #203237;
+  border: 1px solid #44635f;
+  border-radius: 7px;
+  color: #d9e8e0;
+  font: 600 12px 'DM Mono', monospace;
+  letter-spacing: .06em;
+  padding: 7px 14px;
+  min-height: 36px;
+  cursor: pointer;
+  text-transform: uppercase;
+  transition: .22s cubic-bezier(.4, 0, .2, 1);
+}
+.transcript-toggle:hover:not(:disabled) { border-color: #7dc7b6; background: #263d42; }
+.transcript-toggle:disabled { opacity: .5; cursor: default; }
+
+.transcript-feed { min-width: 0; }
+.transcript-rail .caption-live { font-size: 17px; margin: 0; }
+.transcript-rail .caption-idle { font-size: 13px; margin: 0; }
+
+/* --- Sentence bar: now a composer, with Speak and Delete as dwell targets --- */
+.sentence-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 13%;
+  top: 2.5%;
+  left: 4%;
+  right: 4%;
+  padding: 8px 8px 8px 16px;
+}
+
+.sentence-words {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.sentence-words::-webkit-scrollbar { display: none; }
+
+.sentence-placeholder {
+  color: #7e948f;
+  font-size: clamp(15px, 1.5vw, 22px);
+}
+
+.voice-pick {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+.voice-pick span {
+  font: 500 11px 'DM Mono', monospace;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: #7e948f;
+}
+.voice-pick select {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  border-radius: 9px;
+  border: 1px solid rgba(164, 224, 195, .25);
+  background: rgba(12, 26, 24, .8);
+  color: #eafaf1;
+  font-size: 13px;
+}
+
+/* An already-spoken sentence must not be mistakable for words waiting to be spoken. */
+.sentence-placeholder.echo { color: #8fb3aa; font-style: italic; }
+.sentence-placeholder.echo em {
+  font-style: normal;
+  color: #5e7973;
+  font: 500 11px 'DM Mono', monospace;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  margin-right: 6px;
+}
+
+.sentence-word {
+  flex: 0 0 auto;
+  padding: 6px 13px;
+  border-radius: 7px;
+  background: rgba(38, 70, 68, .7);
+  border: 1px solid #4d7d68;
+  color: #eafaf1;
+  font-size: clamp(14px, 1.35vw, 20px);
+  line-height: 1.2;
+  white-space: nowrap;
+  animation: wordIn .22s ease-out;
+}
+@keyframes wordIn {
+  from { opacity: 0; transform: translateY(-4px) scale(.94); }
+  to { opacity: 1; transform: none; }
+}
+
+.sentence-word.dimmed { opacity: .45; }
+
+/* Deleting takes over the board grid, so the words being removed are the same size and
+   spacing as any other target. */
+.board-grid.removing { grid-template-rows: repeat(2, minmax(0, 1fr)); }
+.tile-remove {
+  background: linear-gradient(135deg, rgba(70, 25, 22, .88), rgba(96, 38, 32, .7));
+  border: 1px solid #ef8b75;
+  color: #ffd8cd;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: .18s ease;
+}
+.tile-remove:hover { background: linear-gradient(135deg, rgba(96, 38, 32, .95), rgba(120, 48, 40, .8)); }
+.tile-remove.dwell-near {
+  transform: scale(1.03);
+  box-shadow: 0 0 0 2px rgba(239, 139, 117, .6), 0 0 26px rgba(239, 139, 117, .4);
+}
+.board-grid .dwell-target[data-dwell-action='unsay']::after { content: 'remove this'; color: #e8a595; }
+.board-grid .dwell-target[data-dwell-target='Done deleting']::after { content: 'keep the rest'; }
+
+/* Speak and Delete sit inside the bar so the sentence and the act of saying it are one
+   object, and so neither costs a trip across the board. */
+.sentence-control {
+  flex: 0 0 auto;
+  border-radius: 8px;
+  padding: 8px 18px;
+  min-height: 0;
+  height: 82%;
+  font-weight: 700;
+  font-size: clamp(13px, 1.25vw, 18px);
+  letter-spacing: .04em;
+  cursor: pointer;
+  transition: .18s ease;
+}
+
+.sentence-control.say {
+  background: #a4e0c3;
+  border: 1px solid #a4e0c3;
+  color: #10221e;
+  box-shadow: 0 2px 12px rgba(164, 224, 195, .25);
+}
+.sentence-control.say:hover { box-shadow: 0 4px 18px rgba(164, 224, 195, .4); }
+.sentence-control.say.dwell-near {
+  transform: scale(1.05);
+  box-shadow: 0 0 0 3px rgba(164, 224, 195, .5), 0 0 26px rgba(164, 224, 195, .5);
+}
+
+.sentence-control.delete {
+  background: rgba(58, 40, 36, .85);
+  border: 1px solid #a5705f;
+  color: #ffd8cd;
+}
+.sentence-control.delete:hover { background: rgba(80, 50, 44, .9); }
+.sentence-control.delete[aria-pressed='true'] {
+  background: #ef8b75;
+  border-color: #ef8b75;
+  color: #2a1310;
+}
+.sentence-control.delete.dwell-near {
+  transform: scale(1.05);
+  box-shadow: 0 0 0 3px rgba(239, 139, 117, .5), 0 0 26px rgba(239, 139, 117, .45);
+}
+
+.sentence-bar.composing { border-color: #a4e0c3; }
+.sentence-bar.deleting { border-color: #ef8b75; box-shadow: 0 0 0 1px rgba(239, 139, 117, .3), 0 4px 24px rgba(0, 0, 0, .25); }
+
+/* The grid starts below a taller bar now. */
+.board-grid { top: 17.5%; bottom: 13%; }
+.rest-zone { top: 17.5%; }
+
+/* --- Setup guide extras --- */
+.guide-progress { margin: 10px 0; }
+.guide-extras {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(37, 56, 62, .8);
+}
+.guide-extra-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.guide-extra-label {
+  color: #7eaaa3;
+  font: 500 11px 'DM Mono', monospace;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+.guide-extra-row .ok { color: #75e0ae; font: 11px 'DM Mono', monospace; text-transform: uppercase; }
+.guide-extra-row .warn { color: #ed9b87; font: 11px 'DM Mono', monospace; text-transform: uppercase; }
+.guide-extra-row > span:last-child { color: #708783; font: 11px 'DM Mono', monospace; text-transform: uppercase; }
+.guide-extras .button-row { gap: 8px; }
+.guide-extras .secondary-button { font-size: 13px; padding: 9px; }
+.guide-extra-buttons { margin-top: 10px; justify-content: space-between; }
+.calibration-guide { width: min(540px, calc(100% - 24px)); }
+
+@media (max-width: 899px) {
+  .transcript-rail { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .sentence-control { padding: 8px 12px; }
+  .sentence-bar { gap: 6px; padding: 6px 6px 6px 10px; }
+}

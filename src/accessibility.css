@@ -1,0 +1,75 @@
+/* Shared layout keeps camera ownership independent of viewport changes. */
+.topbar { align-items:center; }
+h1 { font-size:clamp(30px,3.2vw,48px); }
+.brand-tagline { display:block; font-size:14px; letter-spacing:.01em; color:#b5d5cb; margin-top:7px; }
+.workspace { grid-template-columns:minmax(0,1fr) 320px; gap:14px; }
+.stage { max-height:none; min-width:0; aspect-ratio:16/10; }
+.access-panel { border:1px solid #39554f; background:linear-gradient(145deg,#172d2c,#101a22); border-radius:16px; padding:16px; min-width:0; }
+.access-panel h2 { margin:0; font-size:22px; }
+.access-intro p:last-child,.access-status,.ai-controls p { font-size:13px; line-height:1.4; color:#c0d9d0; margin:8px 0; }
+.camera-actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.camera-actions button { padding:9px 6px; min-height:44px; font-size:13px; white-space:normal; }
+.camera-stop { border-color:#db9b89; color:#ffe0d6; }
+.access-panel button[aria-pressed=true] { background:#a4e0c3; color:#10221e; }
+.access-options { display:grid; grid-template-columns:1fr 1fr; gap:2px 8px; border-top:1px solid #39554f; margin-top:12px; padding-top:6px; }
+.access-panel label { display:flex; align-items:center; gap:8px; min-height:44px; font-size:13px; }
+.access-panel input { flex-shrink:0; width:20px; height:20px; accent-color:#a4e0c3; }
+.access-select { justify-content:space-between; }
+.access-select select { min-width:0; min-height:44px; max-width:50%; background:#10231f; color:#fff; border:1px solid #73988c; border-radius:8px; padding:6px; }
+.ai-controls { border-top:1px solid #39554f; margin-top:10px; padding-top:6px; }
+.ai-controls small { display:block; font-size:12px; line-height:1.4; color:#b5c8c2; }
+.transcript-rail { grid-column:1/-1; margin:0; }
+.transcript-toggle,.sentence-control { min-height:44px; }
+.large-text .board-grid .dwell-target { font-size:clamp(18px,1.7vw,28px); }
+.large-text .access-panel label,.large-text .access-panel p,.large-text .camera-actions button { font-size:16px; }
+.high-contrast { background:#000; color:#fff; }
+.high-contrast .access-panel,.high-contrast .transcript-rail,.high-contrast .stage { background:#000; border:2px solid #fff; }
+.high-contrast .dwell-target,.high-contrast .secondary-button { background:#000; color:#fff; border:2px solid #fff; }
+.high-contrast p,.high-contrast small,.high-contrast label,.high-contrast .stage-label span { color:#fff; }
+.reduce-motion *, .reduce-motion *::before,.reduce-motion *::after { animation:none!important; transition:none!important; scroll-behavior:auto!important; }
+select:focus-visible { outline:3px solid #ffd17c; outline-offset:3px; }
+.board-grid .tile-suggested::after { content:'add reply'; }
+.board-grid.removing { overflow-y:auto; grid-auto-rows:minmax(60px,1fr); }
+@media(max-width:1099px) {
+ .workspace { grid-template-columns:minmax(0,1fr); }
+ .access-panel { display:grid; grid-template-columns:1fr 1fr; gap:8px 18px; }
+ .access-intro { display:none; }
+ .camera-actions { grid-column:1/-1; grid-template-columns:repeat(4,1fr); position:sticky; bottom:8px; z-index:25; background:#101a1f; padding:8px; border-radius:10px; }
+ .access-status { grid-column:1/-1; }
+ .access-options,.ai-controls { margin:0; }
+ .access-select { grid-column:1; }
+ .ai-controls { grid-column:2; grid-row:3/5; }
+ .stage { aspect-ratio:16/10; }
+}
+@media(max-width:600px) {
+ .app-shell { padding:10px 8px 90px; }
+ .topbar { gap:8px; align-items:flex-start; }
+ .header-actions { flex-direction:column; gap:5px; align-items:flex-end; }
+ h1 { font-size:32px; }
+ .brand-tagline { font-size:12px; }
+ .stage { aspect-ratio:auto; height:clamp(390px,65svh,650px); min-height:390px; }
+ .board-grid { grid-template-columns:repeat(3,minmax(0,1fr)); grid-template-rows:repeat(4,minmax(0,1fr)); gap:6px; }
+ .board-grid.removing { grid-template-rows:none; grid-auto-rows:60px; }
+ .board-grid .dwell-target { font-size:16px; }
+ .sentence-bar { left:3%; right:3%; padding:6px; }
+ .sentence-control { padding:6px 8px; font-size:13px; }
+ .access-panel { display:block; padding:12px; }
+ .camera-actions { position:fixed; bottom:0; left:0; right:0; border-radius:0; border-top:1px solid #8ab6a6; padding:8px 8px max(8px,env(safe-area-inset-bottom)); gap:5px; }
+ .camera-actions button { font-size:12px; }
+ .access-options { margin-bottom:8px; }
+ .stage-label { bottom:8px; }
+}
+@media(orientation:landscape) and (max-height:550px) {
+ .workspace { grid-template-columns:minmax(0,1fr) 285px; }
+ .access-panel { display:block; }
+ .access-intro { display:none; }
+ .camera-actions { position:static; grid-template-columns:1fr 1fr; padding:0; }
+ .stage { min-height:300px; aspect-ratio:16/10; }
+ .topbar { margin-bottom:8px; }
+ .app-shell { padding:8px; }
+}
+.board-grid .dwell-target[data-dwell-action='speak']::after { content:'add word'; }
+@media(max-width:600px) { .topbar { flex-direction:row; } .sentence-control { width:auto; } }
+.topbar > div:first-child { min-width:0; }
+.topbar h1 { font-size:clamp(24px,3vw,46px); line-height:1.08; max-width:1000px; text-wrap:balance; }
+@media(max-width:600px) { .topbar h1 { font-size:25px; } .header-actions { flex-shrink:0; max-width:125px; } .topbar .eyebrow { font-size:9px; } }
