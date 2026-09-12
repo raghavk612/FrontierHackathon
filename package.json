@@ -1,8 +1,29 @@
 {
-  "name": "v2-simple-board",
+  "name": "cascadia-hackathon",
   "private": true,
+  "version": "0.0.0",
   "type": "module",
-  "scripts": { "dev": "vite --port 5182", "build": "tsc && vite build" },
-  "dependencies": { "@mediapipe/tasks-vision": "^1.0.1" },
-  "devDependencies": { "typescript": "~6.0.2", "vite": "^8.3.0" }
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test:gaze": "esbuild src/gaze/model.test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/gaze-test.mjs --log-level=warning && node node_modules/.cache/gaze-test.mjs",
+    "test:gesture": "esbuild src/gaze/gesture.test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/gesture-test.mjs --log-level=warning && node node_modules/.cache/gesture-test.mjs",
+    "test:suggest": "esbuild src/suggest.test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/suggest-test.mjs --log-level=warning && node node_modules/.cache/suggest-test.mjs"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "esbuild": "^0.28.2",
+    "playwright": "^1.63.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.3.0"
+  },
+  "dependencies": {
+    "@mediapipe/tasks-vision": "^1.0.1",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "webgazer": "^3.5.3"
+  }
 }
