@@ -6,10 +6,10 @@ import type { EyeBox } from './eyePatch'
 type Landmark = { x: number; y: number }
 type Connection = { start: number; end: number }
 
-// The preview uses object-fit: cover and is mirrored, so landmark coordinates need
-// the same crop and flip applied before they line up with what is on screen.
-function projector(canvasWidth: number, canvasHeight: number, videoWidth: number, videoHeight: number) {
-  const scale = Math.max(canvasWidth / videoWidth, canvasHeight / videoHeight)
+// The preview uses object-fit: contain and is mirrored, so landmark coordinates need
+// the same letterboxing and flip applied before they line up with what is on screen.
+export function projector(canvasWidth: number, canvasHeight: number, videoWidth: number, videoHeight: number) {
+  const scale = Math.min(canvasWidth / videoWidth, canvasHeight / videoHeight)
   const drawnWidth = videoWidth * scale
   const drawnHeight = videoHeight * scale
   const offsetX = (canvasWidth - drawnWidth) / 2

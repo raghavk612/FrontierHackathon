@@ -14,6 +14,8 @@ import type { Gesture } from './gaze/gesture'
 import { createListener, recognitionAvailable } from './listen'
 import type { Listener } from './listen'
 import { suggestFor } from './suggest'
+import { relativePointer, recenterOffset } from './gaze/position'
+import { openFrontCamera, watchCamera } from './camera'
 import type { SuggestionSet } from './suggest'
 import { BOARDS, TOP_ROW } from './vocabulary'
 import type { Tile } from './vocabulary'
@@ -210,6 +212,31 @@ function App() {
   const rafRef = useRef<number | null>(null)
   const loopRunningRef = useRef(false)
   const frameCountRef = useRef(0)
+  const cameraSessionRef = useRef(0)
+  const cameraWatchRef = useRef<(() => void) | null>(null)
+  const suspendedRef = useRef(false)
+  const lastVideoTimeRef = useRef(-1)
+  const cameraFailureRef = useRef<(message: string) => void>(() => {})
+  const [cameraPaused, setCameraPaused] = useState(false)
+  const streamRef = useRef<MediaStream | null>(null)
+  const neutralRef = useRef<number[] | null>(null)
+  const neutralSamplesRef = useRef<number[][]>([])
+  const pointerOffsetRef = useRef({ x: 0, y: 0 })
+  const recenterAtRef = useRef(0)
+  const lastFaceRef = useRef(0)
+  const [positioning, setPositioning] = useState(false)
+  const [guideOpen, setGuideOpen] = useState(true)
+  const guideOpenRef = useRef(true)
+  guideOpenRef.current = guideOpen
+  const [panelTab, setPanelTab] = useState<'talk' | 'tracking' | 'details'>('talk')
+  const [aiEnabled, setAiEnabled] = useState(true)
+  const [aiStatus, setAiStatus] = useState('Checking OpenAI…')
+  const aiEnabledRef = useRef(true)
+  const suggestionRequestRef = useRef<AbortController | null>(null)
+  const suggestionVersionRef = useRef(0)
+  const aiTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const conversationRef = useRef<{ speaker: 'you' | 'them'; text: string }[]>([])
+
 
   const modelRef = useRef<FittedModel | null>(null)
   const mixRef = useRef<InputMix>('head')
@@ -293,7 +320,7 @@ function App() {
   const askedAtRef = useRef(0)
   const picksRef = useRef(0)
   const [listenError, setListenError] = useState('')
-  const [showDetails, setShowDetails] = useState(false)
+  const showDetails = panelTab === 'details'
   const [gesturesOn, setGesturesOn] = useState(true)
   const gesturesOnRef = useRef(true)
   const gestureRef = useRef(createGestureDetector())
@@ -341,6 +368,7 @@ function App() {
     if (!trimmed) return
     const fresh = !liveRef.current
     liveRef.current = true
+    conversationRef.current = [...conversationRef.current, { speaker, text: trimmed }].slice(-6)
     setTurns((current) => [...(fresh ? [] : current), { speaker, text: trimmed, time: clockTime() }].slice(-40))
   }, [])
 
@@ -371,22 +399,74 @@ function App() {
   }, [typed, spoken, sayAloud])
 
   useEffect(() => {
+    if (!guideOpen) return
+    dwellRef.current = { target: '', progress: 0 }
+    dwellScoresRef.current.clear()
+    highlightRef.current?.classList.remove('dwell-near')
+    gestureRef.current = createGestureDetector()
+  }, [guideOpen])
+
+  const cancelSuggestions = useCallback(() => {
+    suggestionVersionRef.current++
+    suggestionRequestRef.current?.abort()
+    if (aiTimerRef.current) clearTimeout(aiTimerRef.current)
+    pendingSuggestionRef.current = null
+  }, [])
+
+  useEffect(() => {
+    aiEnabledRef.current = aiEnabled
+    cancelSuggestions()
+    const abort = new AbortController()
+    if (!aiEnabled) { setAiStatus('Local replies'); return }
+    const check = () => fetch('/api/suggestions/status', { signal: abort.signal })
+      .then(r => r.json()).then(data => {
+        if (!abort.signal.aborted) setAiStatus(data.message || (data.configured ? 'OpenAI configured' : 'Add your key to enable OpenAI'))
+      }).catch(() => { if (!abort.signal.aborted) setAiStatus('Local replies · server unavailable') })
+    void check()
+    const timer = window.setInterval(check, 15000)
+    return () => { abort.abort(); window.clearInterval(timer) }
+  }, [aiEnabled, cancelSuggestions])
+
+  useEffect(() => {
     if (!listening) return
     const listener = createListener({
       onInterim: setCaption,
       onFinal: (text) => {
         setCaption('')
-        // Our own synthesised voice coming back through the mic.
         if (boardIsSpeaking()) return
+        cancelSuggestions()
         setLastHeard(text)
         recordTurn('them', text)
         const next = suggestFor(text, SUGGESTION_SLOTS)
-        if (next) {
-          pendingSuggestionRef.current = next
-          askedAtRef.current = performance.now()
-          picksRef.current = 0
-          setAnswerStat(null)
-        }
+        pendingSuggestionRef.current = next
+        askedAtRef.current = performance.now()
+        picksRef.current = 0
+        setAnswerStat(null)
+        if (!aiEnabledRef.current) return
+        const version = suggestionVersionRef.current
+        setAiStatus('Finding replies…')
+        // Combine nearby final transcription fragments and discard stale results.
+        aiTimerRef.current = setTimeout(async () => {
+          const abort = new AbortController()
+          suggestionRequestRef.current = abort
+          const timeout = setTimeout(() => abort.abort(), 12000)
+          try {
+            const response = await fetch('/api/suggestions', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: abort.signal,
+              body: JSON.stringify({ text: text.slice(0, 1500), context: conversationRef.current }),
+            })
+            if (!response.ok) {
+              const problem = await response.json().catch(() => ({}))
+              throw new Error(problem.error || 'OpenAI unavailable · local replies')
+            }
+            const result = await response.json() as SuggestionSet
+            if (version !== suggestionVersionRef.current) return
+            pendingSuggestionRef.current = result
+            setAiStatus('OpenAI replies ready')
+          } catch (error) {
+            if (version === suggestionVersionRef.current) setAiStatus(error instanceof Error && error.name !== 'AbortError' ? error.message : 'OpenAI timed out · local replies')
+          } finally { clearTimeout(timeout) }
+        }, 650)
       },
       onError: (problem) => {
         setListenError(problem)
@@ -404,9 +484,10 @@ function App() {
     return () => {
       listener.stop()
       listenerRef.current = null
+      cancelSuggestions()
       setCaption('')
     }
-  }, [listening, recordTurn])
+  }, [listening, recordTurn, cancelSuggestions])
 
   useEffect(() => {
     const strip = turnsRef.current
@@ -431,7 +512,7 @@ function App() {
         // tile and never decaying.
         dwellScoresRef.current.clear()
         setSuggested(next)
-        setMessage(`Heard a question ${next.because} — showing answers for it.`)
+        setMessage(`Reply options: ${next.because}. Choose what you want to say.`)
       } else if (suggestedAtRef.current && now - suggestedAtRef.current > SUGGESTION_HOLD_MS) {
         suggestedAtRef.current = 0
         setSuggested(null)
@@ -474,6 +555,7 @@ function App() {
     setEvents((current) => [{ id: eventIdRef.current++, name: label, time: clockTime() }, ...current].slice(0, 6))
     picksRef.current += 1
 
+    if (action === 'restore' || action === 'folder') cancelSuggestions()
     if (action === 'restore') {
       pendingSuggestionRef.current = null
       suggestedAtRef.current = 0
@@ -497,7 +579,7 @@ function App() {
     recordAnswer()
     setStats((current) => ({ ...current, selections: current.selections + 1 }))
     setMessage(`Said "${phrase}"`)
-  }, [recordTurn, recordAnswer])
+  }, [recordTurn, recordAnswer, cancelSuggestions])
 
   // Nod and shake answer without having to aim at anything, which matters most for the two
   // words people need fastest. The head sweeps across the board during the movement, so
@@ -617,6 +699,9 @@ function App() {
   )
 
   const detectFrame = useCallback(() => {
+    if (!loopRunningRef.current) return
+    rafRef.current = requestAnimationFrame(detectFrame)
+    if (document.hidden || suspendedRef.current) return
     const video = videoRef.current
     const landmarker = landmarkerRef.current
     const cursor = cursorRef.current
@@ -625,7 +710,14 @@ function App() {
     frameCountRef.current += 1
 
     if (video && landmarker && cursor && patcher && video.readyState >= 2 && video.videoWidth > 0) {
-      const result = landmarker.detectForVideo(video, now)
+      if (video.paused || lastVideoTimeRef.current === video.currentTime) return
+      lastVideoTimeRef.current = video.currentTime
+      let result
+      try { result = landmarker.detectForVideo(video, now) }
+      catch {
+        cameraFailureRef.current('Tracking was interrupted. Tap Enable camera to restart it.')
+        return
+      }
       const landmarks = result.faceLandmarks?.[0]
       const signals = extractSignals(
         landmarks,
@@ -636,6 +728,15 @@ function App() {
       )
 
       if (signals && landmarks) {
+        lastFaceRef.current = now
+        if (!neutralRef.current && !signals.blinking) {
+          neutralSamplesRef.current.push([...signals.head])
+          if (neutralSamplesRef.current.length >= 20) {
+            neutralRef.current = signals.head.map((_, index) => medianOf(neutralSamplesRef.current.map(row => row[index])))
+            neutralSamplesRef.current = []
+            setMessage('Ready from your current position. Calibrate for better accuracy, or skip to use the board.')
+          }
+        }
         const leftBox = eyeBoxFrom(signals.leftCorners, video.videoWidth, video.videoHeight)
         const rightBox = eyeBoxFrom(signals.rightCorners, video.videoWidth, video.videoHeight)
         const appearance = patcher.extract(video, leftBox, rightBox) ?? []
@@ -655,6 +756,7 @@ function App() {
           if (preview) patcher.drawPreview(preview, video, leftBox, rightBox)
         }
 
+        if (modeRef.current === 'collect' && signals.blinking) { phaseRef.current = 'settle'; phaseStartRef.current = now; bufferRef.current = []; stabilityRef.current = []; setPhase('settle') }
         if (modeRef.current === 'collect' && !signals.blinking) {
           const elapsed = now - phaseStartRef.current
           const extent = turnRangeRef.current
@@ -721,7 +823,19 @@ function App() {
         const model = modelRef.current
         const raw = model
           ? predict(model, buildFeatures(signals.head, signals.base, appearance, mixRef.current))
-          : { x: signals.fallbackX, y: signals.fallbackY }
+          : relativePointer(signals.head, neutralRef.current ?? signals.head)
+        if (recenterAtRef.current && now >= recenterAtRef.current && !signals.blinking) {
+          if (model) pointerOffsetRef.current = recenterOffset(raw)
+          else { neutralRef.current = [...signals.head]; pointerOffsetRef.current = { x: 0, y: 0 } }
+          recenterAtRef.current = 0
+          setPositioning(false)
+          historyRef.current = { x: [], y: [] }
+          filterXRef.current.reset(); filterYRef.current.reset()
+          cooldownUntilRef.current = now + 1000
+          setMessage('Pointing position reset. You can stay where you are comfortable.')
+        }
+        raw.x += pointerOffsetRef.current.x
+        raw.y += pointerOffsetRef.current.y
 
         if (!signals.blinking && Number.isFinite(raw.x) && Number.isFinite(raw.y)) {
           const history = historyRef.current
@@ -739,12 +853,12 @@ function App() {
         const { x, y } = cursorPosRef.current
         cursor.style.left = `${x}%`
         cursor.style.top = `${y}%`
-        if (modeRef.current === 'live') updateDwell(x, y, now, signals.blinking)
+        if (modeRef.current === 'live' && neutralRef.current && !recenterAtRef.current && !guideOpenRef.current) updateDwell(x, y, now, signals.blinking)
 
         // Read gestures off the head pose directly rather than the smoothed pointer: the
         // median window and One Euro filter exist to damp exactly the motion a nod is
         // made of, so a shake barely shows up by the time it reaches the cursor.
-        if (modeRef.current === 'live' && gesturesOnRef.current && !signals.blinking) {
+        if (modeRef.current === 'live' && neutralRef.current && !recenterAtRef.current && !guideOpenRef.current && gesturesOnRef.current && !signals.blinking) {
           const gesture = gestureRef.current.push(now, signals.head[HEAD_YAW], signals.head[HEAD_PITCH])
           if (gesture) fireGestureRef.current(gesture)
         } else if (modeRef.current !== 'live') {
@@ -779,8 +893,10 @@ function App() {
           })
         }
       } else {
+        if (modeRef.current === 'collect') { phaseRef.current = 'settle'; phaseStartRef.current = now; bufferRef.current = []; stabilityRef.current = []; setPhase('settle') }
         dwellRef.current = { target: '', progress: 0 }
         dwellScoresRef.current.clear()
+        highlightRef.current?.classList.remove('dwell-near')
         cursor.style.setProperty('--progress', '0%')
         const overlay = overlayRef.current?.getContext('2d')
         if (overlay) overlay.clearRect(0, 0, overlay.canvas.width, overlay.canvas.height)
@@ -791,7 +907,6 @@ function App() {
       }
     }
 
-    rafRef.current = requestAnimationFrame(detectFrame)
   }, [commitSelection, updateDwell])
 
   const beginPoint = useCallback((index: number, checks: boolean) => {
@@ -849,7 +964,9 @@ function App() {
     setMessage('Working out how your head maps to the board…')
 
     // Yield a frame so the message paints before the solve blocks the thread.
+    const session = cameraSessionRef.current
     window.setTimeout(() => {
+      if (session !== cameraSessionRef.current || modeRef.current !== 'idle') return
       const train = trainRef.current
       setMovement(reportMovement(train.head, train.groups, HEAD_YAW, HEAD_PITCH))
 
@@ -936,6 +1053,10 @@ function App() {
       setMessage('Enable the camera before calibrating.')
       return
     }
+    setGuideOpen(false)
+    recenterAtRef.current = 0
+    setPositioning(false)
+    pointerOffsetRef.current = { x: 0, y: 0 }
     modelRef.current = null
     mixRef.current = 'head'
     axisWeightRef.current = { x: 1, y: 1 }
@@ -947,67 +1068,179 @@ function App() {
     setLiveTurn({ yaw: 0, pitch: 0 })
     turnRangeRef.current = { minYaw: Infinity, maxYaw: -Infinity, minPitch: Infinity, maxPitch: -Infinity }
     setStage('calibrating')
-    setMessage('Point your nose at each dot and hold still. Turn your head — do not just move your eyes.')
+    setMessage('Stay in your comfortable position. Turn toward each dot as far as comfortable, then pause.')
     beginPoint(0, false)
   }, [cameraState, beginPoint])
 
   const skipCalibration = useCallback(() => {
+    setGuideOpen(false)
     modeRef.current = 'live'
     modelRef.current = null
+    pointerOffsetRef.current = { x: 0, y: 0 }
     setStage('skipped')
-    setMessage('Not calibrated. Point your nose at a word and hold still — calibrating makes this much more accurate.')
+    setMessage('Board ready. Click a word, or enable the camera to point from your comfortable position.')
+  }, [])
+
+  const releaseCamera = useCallback(() => {
+    cameraSessionRef.current++
+    cameraWatchRef.current?.()
+    cameraWatchRef.current = null
+    suspendedRef.current = false
+    lastVideoTimeRef.current = -1
+    loopRunningRef.current = false
+    if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
+    rafRef.current = null
+    streamRef.current?.getTracks().forEach(track => track.stop())
+    streamRef.current = null
+    const video = videoRef.current
+    if (video) { video.pause(); video.srcObject = null }
+    landmarkerRef.current?.close()
+    landmarkerRef.current = null
+    patchRef.current = null
+    modeRef.current = 'idle'
+    modelRef.current = null
+    neutralRef.current = null
+    neutralSamplesRef.current = []
+    pointerOffsetRef.current = { x: 0, y: 0 }
+    recenterAtRef.current = 0
+    lastFaceRef.current = 0
+    dwellRef.current = { target: '', progress: 0 }
+    dwellScoresRef.current.clear()
+    highlightRef.current?.classList.remove('dwell-near')
+    gestureRef.current = createGestureDetector()
+    historyRef.current = { x: [], y: [] }
+    filterXRef.current.reset(); filterYRef.current.reset()
+    const overlay = overlayRef.current?.getContext('2d')
+    if (overlay) overlay.clearRect(0, 0, overlay.canvas.width, overlay.canvas.height)
+    cursorRef.current?.style.setProperty('--progress', '0%')
+  }, [])
+
+  const stopCamera = useCallback(() => {
+    releaseCamera()
+    setCameraState('off'); setCameraPaused(false); setPositioning(false); setQuality(null)
+    setSignal(null); setMovement(null)
+    setStage('skipped')
+    setCapabilities(current => ({ ...current, face: false }))
+    setMessage('Camera stopped. You can still click words and use captions.')
+  }, [releaseCamera])
+
+  cameraFailureRef.current = (problem) => {
+    releaseCamera()
+    setCameraState('error'); setCameraPaused(false); setStage('skipped')
+    setPositioning(false); setQuality(null)
+    setCameraError(problem); setMessage(problem)
+  }
+
+  const resumeCamera = useCallback(async () => {
+    const video = videoRef.current
+    const track = streamRef.current?.getVideoTracks()[0]
+    const session = cameraSessionRef.current
+    if (!video || !track) return
+    if (track.readyState === 'ended') {
+      cameraFailureRef.current('The phone stopped the camera. Tap Enable camera to reconnect.')
+      return
+    }
+    if (document.hidden || track.muted) return
+    try {
+      await video.play()
+      if (session !== cameraSessionRef.current) return
+      lastVideoTimeRef.current = -1
+      historyRef.current = { x: [], y: [] }
+      filterXRef.current.reset(); filterYRef.current.reset()
+      if (modeRef.current === 'collect') {
+        phaseRef.current = 'settle'; phaseStartRef.current = performance.now()
+        stabilityRef.current = []; bufferRef.current = []; setPhase('settle')
+      }
+      suspendedRef.current = false
+      setCameraPaused(false)
+      cooldownUntilRef.current = performance.now() + 1000
+      setMessage('Camera resumed. Check your pointing position before choosing a word.')
+    } catch {
+      if (session === cameraSessionRef.current) setCameraPaused(true)
+    }
+  }, [])
+
+  const resetPosition = useCallback(() => {
+    if (performance.now() - lastFaceRef.current > 750 || !lastFaceRef.current) {
+      setMessage('Keep your face visible to reset pointing. You do not need to sit in the centre.')
+      return
+    }
+    dwellRef.current = { target: '', progress: 0 }; dwellScoresRef.current.clear()
+    recenterAtRef.current = performance.now() + 2500
+    setPositioning(true)
+    setMessage('Look at the centre of the board from your comfortable position. Resetting in 3 seconds…')
   }, [])
 
   const startCamera = useCallback(async () => {
-    setCameraState('starting')
-    setCameraError('')
+    releaseCamera()
+    const session = cameraSessionRef.current
+    setCameraState('starting'); setCameraPaused(false); setCameraError(''); setQuality(null)
+    setStage('idle'); setPositioning(false)
+    let stream: MediaStream | null = null
     try {
-      // Accuracy is limited by landmark noise, and landmark noise scales with how many
-      // real pixels land on the iris, so ask for the highest sensible resolution and
-      // let the browser fall back if the camera cannot deliver it.
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: 'user',
-          width: { ideal: 1920, min: 640 },
-          height: { ideal: 1080, min: 480 },
-          frameRate: { ideal: 30 },
-        },
-        audio: false,
-      })
+      if (!window.isSecureContext) throw new Error('Camera access needs HTTPS. Open the secure site link on your phone.')
+      if (!navigator.mediaDevices?.getUserMedia) throw new Error('This browser cannot access the camera. Open the site in Safari or Chrome.')
+      stream = await openFrontCamera(constraints => navigator.mediaDevices.getUserMedia(constraints), matchMedia('(pointer: coarse)').matches)
+      if (session !== cameraSessionRef.current) { stream.getTracks().forEach(track => track.stop()); return }
+      streamRef.current = stream
       const video = videoRef.current
       if (!video) throw new Error('Camera preview is unavailable.')
+      video.muted = true
+      video.playsInline = true
       video.srcObject = stream
       await video.play()
-
       const vision = await FilesetResolver.forVisionTasks('/mediapipe')
+      if (session !== cameraSessionRef.current) return
       const options = {
         baseOptions: { modelAssetPath: '/face_landmarker.task', delegate: 'GPU' as const },
-        runningMode: 'VIDEO' as const,
-        numFaces: 1,
-        outputFaceBlendshapes: true,
-        outputFacialTransformationMatrixes: true,
+        runningMode: 'VIDEO' as const, numFaces: 1,
+        outputFaceBlendshapes: true, outputFacialTransformationMatrixes: true,
       }
-      landmarkerRef.current = await FaceLandmarker.createFromOptions(vision, options).catch(() =>
+      const detector = await FaceLandmarker.createFromOptions(vision, options).catch(() =>
         FaceLandmarker.createFromOptions(vision, { ...options, baseOptions: { ...options.baseOptions, delegate: 'CPU' } }),
       )
+      if (session !== cameraSessionRef.current) { detector.close(); return }
+      landmarkerRef.current = detector
       patchRef.current = new EyePatchExtractor()
-
-      const settings = stream.getVideoTracks()[0]?.getSettings()
+      const track = stream.getVideoTracks()[0]
+      if (!track || track.readyState === 'ended') throw new Error('Camera disconnected. Tap Enable camera to try again.')
+      cameraWatchRef.current = watchCamera(track, document, {
+        pause: () => {
+          if (session !== cameraSessionRef.current) return
+          suspendedRef.current = true
+          setCameraPaused(true)
+          dwellRef.current = { target: '', progress: 0 }; dwellScoresRef.current.clear()
+          gestureRef.current = createGestureDetector()
+          highlightRef.current?.classList.remove('dwell-near')
+          if (modeRef.current === 'collect') {
+            phaseRef.current = 'settle'; phaseStartRef.current = performance.now()
+            stabilityRef.current = []; bufferRef.current = []; setPhase('settle')
+          }
+          setMessage('Camera paused by your device. Return to this page to resume.')
+        },
+        resume: () => { if (session === cameraSessionRef.current) void resumeCamera() },
+        ended: () => { if (session === cameraSessionRef.current) cameraFailureRef.current('Camera disconnected. Tap Enable camera to reconnect.') },
+      })
+      suspendedRef.current = document.hidden || track.muted
+      setCameraPaused(suspendedRef.current)
+      const settings = track.getSettings()
       setResolution(`${settings?.width ?? video.videoWidth}×${settings?.height ?? video.videoHeight}`)
       setCameraState('ready')
       modeRef.current = 'live'
-      setMessage(`Face found. Calibrate next — ${CALIBRATION_POINTS.length} dots, about forty seconds.`)
+      setMessage('Sit comfortably and look toward the board. Learning your starting position…')
       refreshRects()
-      if (!loopRunningRef.current) {
-        loopRunningRef.current = true
-        rafRef.current = requestAnimationFrame(detectFrame)
-      }
+      loopRunningRef.current = true
+      rafRef.current = requestAnimationFrame(detectFrame)
     } catch (error) {
+      stream?.getTracks().forEach(track => track.stop())
+      if (session !== cameraSessionRef.current) return
+      releaseCamera()
       setCameraState('error')
       setCameraError(error instanceof Error ? error.message : 'Camera or model startup failed.')
-      setMessage('Camera unavailable.')
+      setMessage('Camera unavailable. You can still use the board by clicking.')
+      setStage('skipped')
     }
-  }, [detectFrame, refreshRects])
+  }, [detectFrame, refreshRects, releaseCamera, resumeCamera])
 
   useEffect(() => {
     blinkSelectRef.current = blinkSelect
@@ -1023,26 +1256,51 @@ function App() {
 
   useEffect(() => {
     refreshRects()
-    const onResize = () => refreshRects()
+    const onResize = () => {
+      refreshRects()
+      dwellRef.current = { target: '', progress: 0 }; dwellScoresRef.current.clear()
+      cooldownUntilRef.current = performance.now() + 1000
+      if (modeRef.current === 'collect') {
+        phaseRef.current = 'settle'; phaseStartRef.current = performance.now()
+        stabilityRef.current = []; bufferRef.current = []; setPhase('settle')
+      }
+    }
+    const observer = new ResizeObserver(onResize)
+    if (stageRef.current) observer.observe(stageRef.current)
+    videoRef.current?.addEventListener('resize', onResize)
     window.addEventListener('resize', onResize)
     window.addEventListener('scroll', onResize, true)
     return () => {
+      observer.disconnect()
+      videoRef.current?.removeEventListener('resize', onResize)
       window.removeEventListener('resize', onResize)
       window.removeEventListener('scroll', onResize, true)
     }
-  }, [refreshRects, boardId, stage, suggested])
+  }, [refreshRects, boardId, stage, suggested, guideOpen])
 
-  useEffect(
-    () => () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current)
-      loopRunningRef.current = false
-      modeRef.current = 'idle'
-      const stream = videoRef.current?.srcObject as MediaStream | null
-      stream?.getTracks().forEach((track) => track.stop())
-      landmarkerRef.current?.close()
-    },
-    [],
-  )
+  useEffect(() => {
+    const onRotate = () => {
+      if (!streamRef.current) return
+      // A different screen orientation changes the head-to-screen mapping, not camera ownership.
+      modelRef.current = null; neutralRef.current = null; neutralSamplesRef.current = []
+      pointerOffsetRef.current = { x: 0, y: 0 }
+      recenterAtRef.current = 0; setPositioning(false)
+      modeRef.current = 'live'; setStage('skipped'); setQuality(null)
+      dwellRef.current = { target: '', progress: 0 }; dwellScoresRef.current.clear()
+      historyRef.current = { x: [], y: [] }; filterXRef.current.reset(); filterYRef.current.reset()
+      setMessage('Screen rotated. Camera is still on; calibrate again for this orientation.')
+      refreshRects()
+    }
+    const orientation = window.screen.orientation
+    if (orientation?.addEventListener) orientation.addEventListener('change', onRotate)
+    else window.addEventListener('orientationchange', onRotate)
+    return () => {
+      if (orientation?.removeEventListener) orientation.removeEventListener('change', onRotate)
+      else window.removeEventListener('orientationchange', onRotate)
+    }
+  }, [refreshRects])
+
+  useEffect(() => () => { releaseCamera(); cancelSuggestions() }, [releaseCamera, cancelSuggestions])
 
   const board = BOARDS[boardId] ?? BOARDS.home
   const collecting = stage === 'calibrating' || stage === 'checking'
@@ -1114,17 +1372,49 @@ function App() {
           <p className="eyebrow">CLEARSPEAK / HEAD POINTING</p>
           <h1>Head-pointing speech board</h1>
         </div>
-        <div className={`status-pill ${cameraState}`}>
-          <span />
-          {cameraState === 'ready' ? 'tracking live' : cameraState === 'starting' ? 'starting' : 'camera off'}
+        <div className="header-actions">
+          <button className="guide-help" onClick={() => setGuideOpen(value => !value)} aria-expanded={guideOpen} disabled={collecting || stage === 'fitting'}>How to calibrate</button>
+          <div className={`status-pill ${cameraState}`}>
+            <span />
+            {cameraState === 'ready' ? (cameraPaused ? 'camera paused' : 'tracking live') : cameraState === 'starting' ? 'starting' : 'camera off'}
+          </div>
         </div>
       </header>
 
       <section className="workspace">
-        <div ref={stageRef} className="stage" aria-label="Speech board stage">
+        <div ref={stageRef} className={`stage ${guideOpen && !collecting ? 'with-guide' : ''} ${collecting ? 'is-calibrating' : ''}`} aria-label="Speech board stage">
           <video ref={videoRef} className="camera-feed" muted playsInline aria-label="Webcam preview" />
           <canvas ref={overlayRef} className="detection-overlay" aria-hidden="true" />
           <div className="stage-shade" />
+
+          {guideOpen && !collecting && stage !== 'fitting' && (
+            <section className="calibration-guide" aria-label="How to calibrate">
+              <div className="guide-heading"><span className="guide-kicker">A quick start</span><button className="guide-close" aria-label="Close calibration instructions" onClick={() => setGuideOpen(false)}>×</button></div>
+              <h2>Point with your head.</h2>
+              <p className="guide-intro">Sit comfortably with your face visible. You do not need to sit perfectly in the middle.</p>
+              <svg className="guide-demo" viewBox="0 0 320 78" role="img" aria-label="Turn your head to move the white pointer toward the gold target">
+                <defs><marker id="guide-arrowhead" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6" fill="none" stroke="currentColor" strokeWidth="1.5" /></marker></defs>
+                <g className="demo-head"><ellipse cx="50" cy="32" rx="20" ry="25" /><path d="M42 26h1m14 0h1M49 30l4 6h-6m-4 8q8 5 14-1M27 73q2-20 23-20t24 20" /></g>
+                <path className="demo-direction" d="M94 34H152" markerEnd="url(#guide-arrowhead)" />
+                <circle className="demo-target" cx="242" cy="32" r="12" />
+                <circle className="demo-pointer" cx="190" cy="32" r="7" />
+                <text x="50" y="76" textAnchor="middle">your head</text><text x="238" y="76" textAnchor="middle">follow the gold dot</text>
+              </svg>
+              <ol className="guide-steps">
+                <li><strong>Enable camera.</strong> Allow camera access when asked.</li>
+                <li><strong>Start calibration.</strong> Turn your head toward each gold dot to guide the white pointer toward it. No perfect overlap needed yet.</li>
+                <li><strong>Hold when it turns green.</strong> Keep still until the next dot appears. There are 16 dots, then 5 checks.</li>
+              </ol>
+              <div className="guide-next" aria-live="polite">
+                <span className="guide-arrow" aria-hidden="true">↓</span>
+                <span>{cameraState === 'ready' ? 'Camera ready. Start here.' : cameraState === 'starting' ? 'Allow the camera, then we’ll begin.' : 'First, turn on your camera.'}</span>
+              </div>
+              <button className="primary-button guide-start" onClick={cameraPaused ? resumeCamera : cameraState === 'ready' ? startCalibration : startCamera} disabled={cameraState === 'starting'}>
+                {cameraPaused ? 'Resume camera' : cameraState === 'ready' ? 'Start calibration' : cameraState === 'starting' ? 'Starting camera…' : 'Enable camera'}
+              </button>
+              <button className="guide-skip" onClick={skipCalibration}>Use the word board without calibrating</button>
+            </section>
+          )}
 
           {collecting && activePoint && (
             <>
@@ -1139,7 +1429,13 @@ function App() {
               >
                 <i className="cal-fill" />
               </div>
-              {stage === 'calibrating' && (
+              <span className="cal-target-arrow" aria-hidden="true" style={{ left: `${activePoint.x * 100}%`, top: `${activePoint.y * 100}%` }}>↓</span>
+              <div className={`calibration-coach ${phase}`} role="status" aria-live="polite" aria-atomic="true">
+                <span className="coach-count">{stage === 'checking' ? 'Check' : 'Dot'} {pointIndex + 1} of {points.length}</span>
+                <strong>{cameraPaused ? 'Resume the camera to continue' : !capabilities.face ? 'Keep your face visible to the camera' : phase === 'record' ? 'Hold still — recording your position' : 'Turn your head toward the gold dot'}</strong>
+                <span>{phase === 'record' ? 'Wait here until the dot moves.' : 'Move your head, not just your eyes. The white pointer is still learning.'}</span>
+              </div>
+              {stage === 'calibrating' && showDetails && (
                 <div className={`turn-meter ${liveTurn.yaw > 10 && liveTurn.pitch > 6 ? 'ok' : 'low'}`}>
                   <strong>
                     turned {liveTurn.yaw.toFixed(0)}° across · {liveTurn.pitch.toFixed(0)}° down
@@ -1154,11 +1450,11 @@ function App() {
             </>
           )}
 
-          <div ref={cursorRef} className="cursor" aria-hidden="true">
+          <div ref={cursorRef} className="cursor" aria-hidden="true" style={{ visibility: guideOpen ? 'hidden' : 'visible' }}>
             <span />
           </div>
 
-          {boardReady && (
+          {boardReady && !guideOpen && (
             <>
               {/* Display only. Controls used to live here as small buttons a few pixels
                   apart, which quietly set the accuracy budget for the whole board to under
@@ -1183,10 +1479,8 @@ function App() {
             </>
           )}
 
-          {!boardReady && !collecting && (
-            <div className="dwell-targets">
-              <div className="precalibration-note">Calibrate or skip to reveal the board.</div>
-            </div>
+          {!boardReady && !collecting && !guideOpen && (
+            <button className="precalibration-note" onClick={skipCalibration}>Show word board</button>
           )}
 
           <div className="stage-label">
@@ -1199,55 +1493,61 @@ function App() {
                     ? `CHECKING · DOT ${pointIndex + 1} OF ${CHECK_POINTS.length}`
                     : board.title.toUpperCase()}
             </strong>
-            <span>{message}</span>
+            <span role="status">{message}</span>
           </div>
         </div>
 
-        <aside className="control-panel">
-          <div className="panel-section">
-            <p className="section-kicker">step 1 · camera</p>
-            <button className="primary-button" onClick={startCamera} disabled={cameraState === 'starting' || cameraState === 'ready'}>
-              {cameraState === 'ready' ? 'Camera enabled' : 'Enable camera'}
-            </button>
-            {cameraError && <p className="error-text">{cameraError}</p>}
+        <aside className="control-panel" aria-label="Controls">
+          <nav className="control-tabs" aria-label="Control pages">
+            {(['talk', 'tracking', 'details'] as const).map(tab => <button key={tab} aria-pressed={panelTab === tab} onClick={() => setPanelTab(tab)}>{tab === 'talk' ? 'Talk' : tab === 'tracking' ? 'Tracking' : 'Details'}</button>)}
+          </nav>
+          <div className="camera-controls panel-section">
+            <div className="button-row">
+              <button className="primary-button" onClick={cameraPaused ? resumeCamera : startCamera} disabled={cameraState === 'starting' || (cameraState === 'ready' && !cameraPaused)}>{cameraPaused ? 'Resume camera' : cameraState === 'starting' ? 'Starting…' : cameraState === 'ready' ? 'Camera on' : 'Enable camera'}</button>
+              <button className="secondary-button stop-button" onClick={stopCamera} disabled={cameraState !== 'ready' && cameraState !== 'starting'}>Stop camera</button>
+            </div>
+            {cameraError && <p className="error-text" role="alert">{cameraError}</p>}
           </div>
+          <div className={`control-page page-${panelTab}`}>
 
-          <div className="panel-section">
+
+          <div className="panel-section setup-section">
             <div className="section-heading">
-              <p className="section-kicker">step 2 · calibrate</p>
+              <p className="section-kicker">your pointing position</p>
               <span>{collecting ? `${pointIndex + 1} / ${points.length}` : stage}</span>
             </div>
             <p className="panel-copy">
-              <strong>Turn to face each dot</strong>, then hold still. There are {CALIBRATION_POINTS.length}. Each one
-              waits until you have actually arrived, then turns green while it records — keep still until it moves on.
-              Point with your nose; moving only your eyes will not work.
+              Sit where you are comfortable; keep your face visible. Turn toward each dot, then pause. You do not need to be centred in the camera.
             </p>
             <div className="progress-track">
               <span style={{ width: `${progress * 100}%` }} />
             </div>
             <div className="button-row">
-              <button className="secondary-button" onClick={startCalibration} disabled={collecting}>
+              <button className="secondary-button" onClick={startCalibration} disabled={collecting || cameraState !== 'ready' || cameraPaused}>
                 {quality ? 'Calibrate again' : `Calibrate · ${CALIBRATION_POINTS.length} dots`}
               </button>
               <button className="text-button" onClick={skipCalibration}>
                 Skip
               </button>
             </div>
-            {quality && !collecting && (
+            <button className="secondary-button reset-position" onClick={resetPosition} disabled={cameraState !== 'ready' || cameraPaused || collecting || positioning}>
+              {positioning ? 'Look at the board centre…' : 'Reset pointing position'}
+            </button>
+            {quality && !collecting && panelTab === 'tracking' && (
               <div className={`result ${grade}`}>
                 <strong>{grade === 'good' ? 'Good' : grade === 'usable' ? 'Usable' : 'Rough'}</strong>
                 <span>lands within {quality.measured.toFixed(1)}% of the word you aim at</span>
               </div>
             )}
-            {advice && <p className="panel-copy tight warn">{advice}</p>}
+            {advice && panelTab === 'tracking' && <p className="panel-copy tight warn">{advice}</p>}
           </div>
 
-          <div className="panel-section subtitle-panel">
+          <div className="panel-section subtitle-panel talk-section">
             <div className="section-heading">
               <p className="section-kicker">what they said</p>
               <span className={listening ? 'ok' : ''}>{listening ? 'listening' : 'off'}</span>
             </div>
-            <div className="subtitle-feed">
+            <div className="subtitle-feed" aria-live="polite">
               {caption ? (
                 <p className="caption-live interim">{caption}</p>
               ) : lastHeard ? (
@@ -1272,17 +1572,16 @@ function App() {
             ) : null}
           </div>
 
-          <div className="panel-section">
+          <div className="panel-section talk-section">
             <div className="section-heading">
               <p className="section-kicker">say something</p>
               <span className={speechAvailable() ? 'ok' : ''}>{speechAvailable() ? 'voice ready' : 'no voice'}</span>
             </div>
             <p className="panel-copy">
-              For anything the board has no tile for. Type it and press speak — with the box empty, speak repeats the
-              last thing said, for when nobody caught it.
+              Type a phrase to speak, or repeat the last thing said.
             </p>
             <input
-              className="say-input"
+              className="say-input" aria-label="Phrase to speak"
               value={typed}
               placeholder="Type anything to say out loud"
               onChange={(event) => setTyped(event.target.value)}
@@ -1302,16 +1601,19 @@ function App() {
             )}
           </div>
 
-          <div className="panel-section">
+          <div className="panel-section talk-section">
             <div className="section-heading">
               <p className="section-kicker">suggested answers</p>
               <span className={suggested ? 'ok' : ''}>{suggested ? 'showing' : 'waiting'}</span>
             </div>
             <p className="panel-copy">
-              When someone asks a question, the bottom row becomes the words that answer it. The top row never moves.
+              Replies to questions and statements. Choose a tile to speak; nothing is said automatically.
             </p>
-            {suggested && <p className="panel-copy tight">Heard a question {suggested.because}.</p>}
-            {answerStat && (
+            <label className="toggle-row"><input type="checkbox" checked={aiEnabled} onChange={event => setAiEnabled(event.target.checked)} />Use OpenAI suggestions</label>
+            <p className="panel-copy tight" role="status">{aiStatus}</p>
+            <p className="privacy-note">When enabled, recent transcript text is sent to OpenAI for reply options.</p>
+            {suggested && <p className="panel-copy tight">{suggested.because}</p>}
+            {answerStat && panelTab === 'details' && (
               <div className="result good">
                 <strong>
                   {answerStat.picks} {answerStat.picks === 1 ? 'pick' : 'picks'}
@@ -1321,7 +1623,7 @@ function App() {
             )}
           </div>
 
-          <div className="panel-section">
+          <div className="panel-section tracking-section">
             <p className="section-kicker">shortcuts</p>
             <label className="toggle-row">
               <input type="checkbox" checked={gesturesOn} onChange={(event) => setGesturesOn(event.target.checked)} />
@@ -1333,7 +1635,7 @@ function App() {
             </label>
           </div>
 
-          <div className="panel-section">
+          <div className="panel-section tracking-section">
             <div className="section-heading">
               <p className="section-kicker">pointer steadiness</p>
               <span>{STABILITY_PRESETS[stability].label}</span>
@@ -1348,9 +1650,7 @@ function App() {
             </div>
           </div>
 
-          <button className="details-toggle" onClick={() => setShowDetails((current) => !current)}>
-            {showDetails ? 'Hide technical details' : 'Show technical details'}
-          </button>
+
 
           {showDetails && cameraState === 'ready' && (
             <div className="panel-section">
@@ -1465,7 +1765,7 @@ function App() {
           </div>
           )}
 
-          <div className="panel-section">
+          <div className="panel-section details-section">
             <p className="section-kicker">recent picks</p>
             {events.length === 0 ? (
               <p className="muted">Nothing said yet.</p>
@@ -1477,6 +1777,7 @@ function App() {
                 </div>
               ))
             )}
+          </div>
           </div>
         </aside>
       </section>
@@ -1500,7 +1801,7 @@ function App() {
 
       <footer>
         <span>dwell {DWELL_MS} ms · nearest-word targeting · head pointing</span>
-        <span>head tracking runs on-device · captions use the browser speech service</span>
+        <span>head tracking stays on-device · captions use your browser’s speech service</span>
       </footer>
     </main>
   )

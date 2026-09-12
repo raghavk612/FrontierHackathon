@@ -155,3 +155,187 @@
 .say-input { background: #0c1519; border: 1px solid #3a5559; border-radius: 6px; color: #eaf1ed; display: block; font: inherit; font-size: 14px; margin: 12px 0 10px; padding: 10px 12px; width: 100%; }
 .say-input::placeholder { color: #6d8580; }
 .say-input:focus { border-color: #a4e0c3; outline: none; }
+
+/* Use the screen width for large controls instead of a narrow scrolling sidebar. */
+.app-shell { padding: 16px 20px; }
+.topbar, .workspace, .conversation, footer { max-width: 1900px; }
+h1 { font-size: clamp(24px, 2.4vw, 36px); }
+.topbar { margin-bottom: 14px; }
+.workspace { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(480px, 1fr); align-items: start; gap: 18px; }
+.stage { width: 100%; max-width: none; max-height: none; aspect-ratio: 16 / 9; }
+.camera-feed { object-fit: contain; }
+.control-panel { width: 100%; max-height: none; overflow: visible; min-width: 0; }
+.control-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 8px; border-bottom: 1px solid #294047; }
+.control-tabs button { min-height: 44px; border: 1px solid transparent; background: #17272c; color: #b8cec6; border-radius: 7px; font-weight: 600; cursor: pointer; }
+.control-tabs button[aria-pressed='true'] { background: #294c42; border-color: #8ecbb3; color: #f1fff8; }
+.camera-controls { padding: 10px 12px; }
+.button-row { gap: 8px; }
+button { min-height: 44px; }
+button:disabled { opacity: .5; cursor: default; }
+button:focus-visible, input:focus-visible { outline: 3px solid #ffd17c; outline-offset: 3px; }
+.stop-button { border-color: #c88a79; color: #ffd4c8; }
+.control-page { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.control-page .panel-section { padding: 12px; min-width: 0; border-bottom: 1px solid #24343a; }
+.control-page .panel-copy { font-size: 13px; line-height: 1.35; margin: 6px 0; }
+.control-page .section-heading { gap: 5px; flex-wrap: wrap; }
+.control-page .section-kicker { font-size: 11px; }
+.control-page .progress-track { margin: 8px 0; }
+.control-page .reset-position { margin-top: 8px; font-size: 13px; }
+.control-page .primary-button, .control-page .secondary-button { padding: 8px; font-size: 14px; }
+.control-page .text-button { padding: 8px; font-size: 14px; }
+.control-page .subtitle-feed { min-height: 66px; max-height: 96px; margin: 8px 0; }
+.control-page .caption-live { font-size: 17px; }
+.control-page .say-input { margin: 8px 0; min-height: 44px; }
+.control-page .toggle-row { min-height: 44px; margin: 4px 0; font-size: 14px; }
+.toggle-row input { width: 22px; height: 22px; flex-shrink: 0; }
+.control-page .privacy-note { font-size: 12px; line-height: 1.3; color: #9cb5ad; margin: 6px 0; }
+.control-page .segmented { flex-wrap: wrap; margin-top: 8px; }
+.control-page .segmented button { font-size: 12px; min-width: 85px; }
+.page-talk .tracking-section, .page-talk .details-section { display: none; }
+.page-tracking .talk-section, .page-tracking .details-section { display: none; }
+.page-details .setup-section, .page-details .talk-section, .page-details .tracking-section { display: none; }
+.page-details { max-height: calc(100dvh - 260px); overflow-y: auto; }
+.conversation { margin-top: 12px; }
+.stage-label { bottom: 12px; right: 8%; }
+.stage-label span { font-size: 13px; }
+.board-grid .dwell-target { font-size: clamp(14px, 1.15vw, 22px); }
+.rest-zone { height: auto; }
+@media (min-width: 1600px) {
+  .control-page .panel-section { padding: 16px; }
+  .control-page .panel-copy { font-size: 15px; }
+}
+@media (max-width: 1099px) {
+  .workspace { grid-template-columns: minmax(0, 1fr); }
+  .control-panel { max-height: none; }
+  .stage { max-width: 100%; }
+  .app-shell { padding: 12px; }
+  .camera-controls { position: sticky; top: 0; background: #101a1f; z-index: 20; }
+}
+@media (max-width: 520px) {
+  .control-page { grid-template-columns: 1fr; }
+  .topbar { gap: 8px; }
+  .status-pill { font-size: 9px; }
+  .board-grid .dwell-target { font-size: 11px; }
+  .board-grid .dwell-target::after { display: none; }
+  .stage-label span { font-size: 11px; }
+}
+
+/* Phone and tablet layouts preserve large targets, not a scaled-down desktop board. */
+html { -webkit-text-size-adjust: 100%; }
+body { min-width: 0; }
+.app-shell { padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right)); padding-bottom: max(16px, env(safe-area-inset-bottom)); }
+button, input { touch-action: manipulation; }
+.control-page .say-input { font-size: 16px; }
+.topbar > div { min-width: 0; }
+.topbar h1 { overflow-wrap: anywhere; }
+.status-pill { flex-shrink: 0; }
+.precalibration-note { max-width: 86%; position: absolute; left: 50%; top: 45%; transform: translate(-50%, -50%); padding: 14px; font: inherit; font-size: 14px; }
+.sentence-bar span { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 1099px) {
+  .workspace { gap: 12px; }
+  .control-page .panel-section { padding: 14px; }
+  .conversation { flex-direction: column; align-items: stretch; }
+  .conversation-label { display: flex; gap: 12px; }
+  .camera-controls { position: static; }
+  .stage { max-height: none; }
+}
+@media (max-width: 599px) {
+  .topbar { align-items: flex-start; gap: 8px; flex-wrap: wrap; }
+  .topbar h1 { font-size: 25px; line-height: 1.1; }
+  .eyebrow { font-size: 10px; }
+  .status-pill { padding: 6px 9px; font-size: 10px; }
+  .stage { aspect-ratio: 3 / 4; min-height: 390px; }
+  .board-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: repeat(4, minmax(0, 1fr)); top: 16%; bottom: 19%; gap: 6px; }
+  .board-grid .dwell-target { min-height: 44px; padding: 5px; font-size: clamp(15px, 4vw, 20px); line-height: 1.2; }
+  .board-grid .dwell-target::after { display: none; }
+  .sentence-bar { top: 3%; height: 10%; padding: 6px 8px; left: 7%; right: 7%; }
+  .sentence-bar span { font-size: 15px; }
+  .stage-label { left: 8%; right: 8%; bottom: 8px; max-height: 16%; overflow-y: auto; }
+  .stage-label span { font-size: 12px; line-height: 1.3; }
+  .rest-zone { top: 16%; bottom: 19%; }
+  .control-page { grid-template-columns: 1fr; }
+  .page-details { max-height: none; overflow: visible; }
+  .control-tabs { position: sticky; top: 0; background: #101a1f; z-index: 20; }
+  .control-page .panel-copy { font-size: 15px; }
+  .control-page .section-kicker { font-size: 12px; }
+  .control-page .primary-button, .control-page .secondary-button { min-height: 48px; font-size: 15px; }
+  .turn-meter { width: 90%; padding: 5px; }
+  .turn-meter span { font-size: 11px; }
+  footer { flex-direction: column; gap: 8px; line-height: 1.4; }
+}
+@media (min-width: 600px) and (max-width: 1099px) {
+  .stage { aspect-ratio: 16 / 10; }
+  .board-grid .dwell-target { font-size: clamp(15px, 2.2vw, 20px); }
+}
+@media (max-height: 500px) and (min-width: 600px) {
+  .topbar { margin-bottom: 8px; }
+  .topbar h1 { font-size: 23px; }
+  .stage { aspect-ratio: 16 / 9; min-height: 290px; }
+  .board-grid .dwell-target { min-height: 44px; }
+  .board-grid .dwell-target::after { display: none; }
+  .control-tabs { position: sticky; top: 0; background: #101a1f; z-index: 20; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+@media (max-width: 599px) {
+  .app-shell { padding-bottom: calc(88px + env(safe-area-inset-bottom)); }
+  .camera-controls { position: fixed; bottom: 0; left: 0; right: 0; top: auto; padding: 10px max(12px, env(safe-area-inset-left)) calc(10px + env(safe-area-inset-bottom)); background: #101a1f; border-top: 1px solid #55746d; z-index: 30; box-shadow: 0 -5px 20px #0005; }
+  .camera-controls .error-text { max-height: 72px; overflow-y: auto; margin: 6px 0 0; }
+  .camera-controls .button-row > button { min-height: 48px; }
+  .page-talk .setup-section { display: none; }
+}
+button.precalibration-note { background: #1c3338; color: #dceee5; border-radius: 10px; min-height: 48px; cursor: pointer; }
+
+/* First-run coaching stays in the camera stage, next to the action it explains. */
+.header-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.guide-help { background: #172b30; color: #c6e3d7; border: 1px solid #42655d; border-radius: 8px; padding: 8px 12px; font-size: 14px; }
+.stage.with-guide { min-height: 540px; }
+.calibration-guide { position: absolute; z-index: 12; inset: 12px; margin: auto; width: min(480px, calc(100% - 24px)); height: fit-content; max-height: calc(100% - 24px); overflow-y: auto; padding: 18px 22px; border: 1px solid #476b63; border-radius: 16px; background: #0e2026f5; box-shadow: 0 12px 50px #0005; }
+.guide-heading { display: flex; justify-content: space-between; align-items: center; }
+.guide-kicker { color: #9fe0c4; text-transform: uppercase; letter-spacing: .12em; font-size: 11px; font-weight: 700; }
+.guide-close { background: transparent; border: 0; color: #aac9bd; font-size: 25px; width: 44px; padding: 0; }
+.calibration-guide h2 { font-size: clamp(22px, 2vw, 28px); line-height: 1.1; margin: 0 0 8px; letter-spacing: -.025em; }
+.guide-intro { color: #b1cbc0; font-size: 14px; line-height: 1.4; margin: 0; }
+.guide-demo { display: block; width: 100%; height: 78px; margin: 10px 0; color: #9fdbc2; }
+.demo-head { stroke: #bcebd5; stroke-width: 2; fill: none; transform-origin: 50px 55px; animation: guideHead 3s ease-in-out infinite; }
+.demo-direction { stroke: currentColor; stroke-width: 2; fill: none; stroke-dasharray: 5 5; animation: guideDash 1s linear infinite; }
+.demo-target { fill: #f5c46d; animation: guideTarget 3s ease-in-out infinite; }
+.demo-pointer { fill: none; stroke: white; stroke-width: 2.5; animation: guidePointer 3s ease-in-out infinite; }
+.guide-demo text { fill: #a3bbb2; font-size: 11px; }
+.guide-steps { padding-left: 22px; margin: 8px 0; color: #c9dcd4; font-size: 14px; line-height: 1.4; }
+.guide-steps li { padding-left: 3px; margin: 7px 0; }
+.guide-steps li::marker { color: #a4e0c3; font-weight: 700; }
+.guide-steps strong { color: #f1f8f4; }
+.guide-next { display: flex; align-items: center; justify-content: center; gap: 10px; color: #f5d38e; font-size: 13px; margin-top: 8px; }
+.guide-arrow { display: inline-block; font-size: 27px; animation: guideBounce 1s ease-in-out infinite; }
+.guide-start { min-height: 48px; margin-top: 4px; }
+.guide-skip { display: block; width: 100%; color: #b0ccbf; font-size: 13px; background: transparent; border: none; padding: 8px 0 0; text-decoration: underline; text-underline-offset: 3px; }
+.with-guide .stage-label { display: none; }
+.cal-target-arrow { position: absolute; transform: translate(-50%, -115%); z-index: 7; color: #ffdf98; font-size: 28px; line-height: 1; pointer-events: none; animation: targetBounce 1s ease-in-out infinite; }
+.cal-dot.record { background: #83e4ae; }
+.calibration-coach { position: absolute; bottom: 5px; left: 7%; right: 7%; z-index: 8; display: flex; flex-direction: column; align-items: center; gap: 3px; text-align: center; padding: 7px; border-radius: 9px; background: #10242bf2; pointer-events: none; }
+.calibration-coach strong { color: #ffe0a1; font-size: clamp(13px, 1.4vw, 19px); }
+.calibration-coach.record strong { color: #a5f1c4; }
+.calibration-coach > span { font-size: 12px; line-height: 1.25; color: #bbd3c8; }
+.calibration-coach .coach-count { font-size: 10px; text-transform: uppercase; letter-spacing: .1em; }
+.is-calibrating .stage-label { display: none; }
+@keyframes guideHead { 0%,100% { transform: rotate(-10deg); } 50% { transform: rotate(12deg); } }
+@keyframes guideDash { to { stroke-dashoffset: -10; } }
+@keyframes guideTarget { 0%,100% { transform: translateX(0); } 50% { transform: translateX(28px); } }
+@keyframes guidePointer { 0%,100% { transform: translateX(0); } 55% { transform: translateX(80px); } }
+@keyframes guideBounce { 0%,100% { transform: translateY(-3px); } 50% { transform: translateY(3px); } }
+@keyframes targetBounce { 0%,100% { transform: translate(-50%, -115%); } 50% { transform: translate(-50%, -130%); } }
+@media (max-width: 599px) {
+  .header-actions { justify-content: space-between; width: 100%; }
+  .guide-help { font-size: 13px; }
+  .stage.with-guide { min-height: 630px; }
+  .calibration-guide { padding: 12px 14px; }
+  .guide-steps { font-size: 14px; }
+  .calibration-coach { left: 3%; right: 3%; }
+  .calibration-coach > span { font-size: 11px; }
+  .calibration-coach strong { font-size: 13px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .demo-head, .demo-direction, .demo-target, .demo-pointer, .guide-arrow, .cal-target-arrow { animation: none; }
+}

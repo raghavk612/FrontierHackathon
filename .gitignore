@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local server credentials
+.env
+.env.*
+!.env.example
