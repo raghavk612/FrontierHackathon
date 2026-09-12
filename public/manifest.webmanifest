@@ -1,0 +1,14 @@
+{
+  "id": "./",
+  "name": "VividVision",
+  "short_name": "VividVision",
+  "description": "Assistive communication with head pointing, captions, and spoken replies.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0b1117",
+  "theme_color": "#0b1117",
+  "icons": [
+    { "src": "icons/vividvision.png", "sizes": "1536x1536", "type": "image/png", "purpose": "any" }
+  ]
+}
