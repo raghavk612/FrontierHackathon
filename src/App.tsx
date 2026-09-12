@@ -21,6 +21,7 @@ import { BOARDS, TOP_ROW } from './vocabulary'
 import type { Tile } from './vocabulary'
 import { REQUEST, URGENT, bluetoothAvailable, createBeacon, serialAvailable } from './alert'
 import type { Beacon, BeaconStatus } from './alert'
+import { publishCloudMessage } from './supabase'
 
 const DWELL_MS = 1100
 const CONTROL_DWELL_MS = 650
@@ -776,6 +777,9 @@ function App() {
       }
       const phrase = words.map((word) => word.speech).join(' ')
       speak(phrase)
+      void publishCloudMessage(phrase).catch(() => {
+        setMessage('Spoken aloud, but caregiver sync is temporarily unavailable')
+      })
       recordTurn('you', phrase)
       recordAnswer()
       setStats((stat) => ({ ...stat, selections: stat.selections + 1 }))
