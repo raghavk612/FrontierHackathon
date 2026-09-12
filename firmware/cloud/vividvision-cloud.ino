@@ -1,5 +1,5 @@
 /*
- * ClearSpeak caregiver alert beacon  --  Particle Argon, Wi-Fi build
+ * VividVision caregiver alert beacon  --  Particle Argon, Wi-Fi build
  *
  * The speech board gives someone a voice. This gives that voice reach.
  * A screen only talks to whoever is already looking at it, which is the one
@@ -13,7 +13,7 @@
  * kitchen downstairs, or in another building, and the person using the board
  * does not have to be near anyone for it to work.
  *
- * The trade is a network dependency, which is why firmware/clearspeak-beacon.ino
+ * The trade is a network dependency, which is why firmware/vividvision-beacon.ino
  * still exists. That one speaks Bluetooth and USB serial and needs no network.
  *
  * Wiring is identical either way: see WIRING.md. A0 drives the LED and returns

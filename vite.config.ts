@@ -4,7 +4,7 @@ import { suggestionMiddleware } from './server/suggestions.mjs'
 
 export default defineConfig({
   plugins: [react(), {
-    name: 'clearspeak-suggestions',
+    name: 'vividvision-suggestions',
     configureServer(server) {
       server.middlewares.use(suggestionMiddleware(server.config.root))
     },

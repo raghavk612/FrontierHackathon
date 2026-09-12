@@ -199,7 +199,7 @@ function boardIsSpeaking() {
   return speaking || liveUtterance !== null || performance.now() < speakingUntil
 }
 
-const VOICE_CHOICE_KEY = 'clearspeak.voice'
+const VOICE_CHOICE_KEY = 'vividvision.voice'
 let voiceList: SpeechSynthesisVoice[] = []
 let voicesChangedHandler: (() => void) | null = null
 
@@ -1587,10 +1587,10 @@ function App() {
   return (
     <main className={`app-shell ${largeText ? 'large-text' : ''} ${highContrast ? 'high-contrast' : ''} ${reduceMotion ? 'reduce-motion' : ''}`}>
       {welcomeOpen && (
-        <div className="welcome-overlay" role="dialog" aria-label="Welcome to ClearSpeak">
+        <div className="welcome-overlay" role="dialog" aria-label="Welcome to VividVision">
           <div className="welcome-card">
             <div className="welcome-glow" aria-hidden="true" />
-            <p className="welcome-eyebrow">CLEARSPEAK</p>
+            <p className="welcome-eyebrow">VIVIDVISION</p>
             <h2 className="welcome-title">Normalize Living for Those Without</h2>
             <p className="welcome-sub">
               Communicate with head movement, touch, or a keyboard. Choose your words and speak on your terms.
@@ -1635,7 +1635,7 @@ function App() {
       )}
       <header className="topbar">
         <div>
-          <p className="eyebrow">CLEARSPEAK / ASSISTIVE COMMUNICATION</p>
+          <p className="eyebrow">VIVIDVISION / ASSISTIVE COMMUNICATION</p>
           <h1>Normalize Living for Those Without</h1>
         </div>
         <div className="header-actions">

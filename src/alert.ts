@@ -150,7 +150,7 @@ export function createBeacon(onStatus: (status: BeaconStatus, detail: string) =>
       onStatus('error', 'This browser has no Web Bluetooth. Chrome or Edge will work.')
       return
     }
-    onStatus('connecting', 'Pick "ClearSpeak" in the pairing window.')
+    onStatus('connecting', 'Pick "VividVision" in the pairing window.')
     void (async () => {
       try {
         const device = await api.requestDevice({ filters: [{ services: [SERVICE_UUID] }] })

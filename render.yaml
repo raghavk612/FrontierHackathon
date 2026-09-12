@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: clearspeak-replies
+    name: vividvision-replies
     runtime: docker
     plan: free
     branch: main

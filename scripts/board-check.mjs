@@ -109,6 +109,6 @@ await page.waitForTimeout(350)
 console.log('removed last one :', (await words()).length === 0 ? 'empty, mode exited' : 'still has words')
 console.log('back to board    :', (await page.locator('[data-dwell-target="Help"]').count()) ? 'yes' : 'NO')
 
-await page.screenshot({ path: '/tmp/clearspeak-board.png' })
+await page.screenshot({ path: '/tmp/vividvision-board.png' })
 console.log('errors           :', errors.length ? errors.join(' // ') : 'none')
 await browser.close()

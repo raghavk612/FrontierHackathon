@@ -50,8 +50,8 @@ const spoken = await page.locator('.sentence-bar span').first().innerText()
 console.log('after Help     :', spoken)
 
 // Take a screenshot for visual reference
-await page.screenshot({ path: '/tmp/clearspeak-polished.png', fullPage: false })
-console.log('screenshot     : /tmp/clearspeak-polished.png')
+await page.screenshot({ path: '/tmp/vividvision-polished.png', fullPage: false })
+console.log('screenshot     : /tmp/vividvision-polished.png')
 
 console.log('errors         :', errors.length ? errors.join(' // ') : 'none')
 

@@ -1,5 +1,5 @@
 /*
- * ClearSpeak caregiver alert beacon  --  Particle Argon
+ * VividVision caregiver alert beacon  --  Particle Argon
  *
  * The speech board gives someone a voice. This gives that voice reach.
  * A screen only talks to whoever is already looking at it, which is the one
@@ -90,7 +90,7 @@ void setup() {
   Serial.begin(9600);
 
   BLE.on();
-  BLE.setDeviceName("ClearSpeak");
+  BLE.setDeviceName("VividVision");
   BLE.addCharacteristic(alertCharacteristic);
 
   /*
@@ -102,7 +102,7 @@ void setup() {
   advertisement.appendServiceUUID(SERVICE_UUID);
 
   BleAdvertisingData scanResponse;
-  scanResponse.appendLocalName("ClearSpeak");
+  scanResponse.appendLocalName("VividVision");
 
   BLE.advertise(&advertisement, &scanResponse);
 }

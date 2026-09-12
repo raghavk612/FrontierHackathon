@@ -68,7 +68,7 @@ console.log('errors           :', errors.length ? errors.join(' | ') : 'none')
 // notices the silence and re-speaks the same sentence on the on-device voice.
 console.log('\n-- with the network voice deliberately chosen --')
 await page.evaluate(() => {
-  localStorage.setItem('clearspeak.voice', 'Google US English')
+  localStorage.setItem('vividvision.voice', 'Google US English')
   window.__heard = []
   window.__attempts = []
 })

@@ -16,6 +16,6 @@ const server = createServer((req, res) => {
 server.requestTimeout = 15000
 server.headersTimeout = 10000
 server.listen(Number(process.env.PORT || 3001), '0.0.0.0', () => {
-  console.log('ClearSpeak replies backend is listening')
+  console.log('VividVision replies backend is listening')
 })
 process.on('SIGTERM', () => server.close())

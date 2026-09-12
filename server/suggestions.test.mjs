@@ -32,7 +32,7 @@ test('bounds context and rejects empty or oversized utterances', () => {
   assert.equal(input.context[0].text.length, 500)
 })
 test('HTTP endpoint rejects cross-origin and invalid requests, hides key, and returns replies', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'clearspeak-test-'))
+  const root = mkdtempSync(join(tmpdir(), 'vividvision-test-'))
   writeFileSync(join(root, '.env.local'), 'OPENAI_API_KEY=test-only\n')
   let calls = 0
   const middleware = suggestionMiddleware(root, async () => { calls++; return options })
@@ -63,7 +63,7 @@ test('quota failures report an actionable message without leaking upstream detai
 })
 
 test('hosted backend permits Pages preflight and replies but rejects unrelated sites', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'clearspeak-cors-'))
+  const root = mkdtempSync(join(tmpdir(), 'vividvision-cors-'))
   writeFileSync(join(root, '.env.local'), 'OPENAI_API_KEY=test-only\n')
   const origin = 'https://raghavk612.github.io'
   const middleware = suggestionMiddleware(root, async () => options, { allowedOrigins: [origin] })

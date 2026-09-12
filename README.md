@@ -1,4 +1,4 @@
-# ClearSpeak
+# VividVision
 
 A head-pointing communication board with optional captions and OpenAI reply suggestions.
 

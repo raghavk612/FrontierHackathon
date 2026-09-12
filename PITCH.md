@@ -1,4 +1,4 @@
-# ClearSpeak — judge deck
+# VividVision — judge deck
 
 Mapped to the four announced criteria: **Product execution · Technical feasibility ·
 Viability beyond the prototype · Business appeal and defensibility.**
@@ -15,7 +15,7 @@ published price. Nothing is estimated.
 
 ## Slide 1 — Title
 
-**ClearSpeak**
+**VividVision**
 A speech board you drive with your head. Any laptop. No hardware.
 
 ---
