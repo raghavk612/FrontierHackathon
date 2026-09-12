@@ -162,3 +162,5 @@ select:focus-visible { outline:3px solid #ffd17c; outline-offset:3px; }
 .access-panel .dwell-near,.transcript-toggle.dwell-near,.guide-help.dwell-near { outline:3px solid #ffd17c; outline-offset:3px; box-shadow:0 0 16px #ffd17c55; }
 .team-credit { margin:16px 0 2px; text-align:center; font-size:12px; color:#accac0; }
 .team-credit strong { color:#d8eee6; }
+.precalibration-note.dwell-near { outline:3px solid #ffd17c; outline-offset:3px; background:#365b50; }
+.access-panel label:has(input.dwell-near) { outline:3px solid #ffd17c; outline-offset:2px; border-radius:6px; background:#28493e; }

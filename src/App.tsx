@@ -22,7 +22,8 @@ import type { Tile } from './vocabulary'
 import { REQUEST, URGENT, bluetoothAvailable, createBeacon, serialAvailable } from './alert'
 import type { Beacon, BeaconStatus } from './alert'
 
-const DWELL_MS = 800
+const DWELL_MS = 1100
+const CONTROL_DWELL_MS = 650
 const COOLDOWN_MS = 350
 const BLINK_SELECT_MS = 600
 
@@ -693,7 +694,7 @@ function App() {
     const stageElement = stageRef.current
     if (!stageElement) return
     const bounds = stageElement.getBoundingClientRect()
-    const controls = Array.from(document.querySelectorAll<HTMLElement>('.access-panel button, .access-panel input, .access-panel select, .transcript-toggle, .guide-help'))
+    const controls = Array.from(document.querySelectorAll<HTMLElement>('.access-panel button, .access-panel input, .access-panel select, .transcript-toggle, .guide-help, .precalibration-note'))
     controls.forEach((element, index) => {
       element.dataset.dwellTarget = `control-${index}`
       element.dataset.dwellAction = 'control'
@@ -702,7 +703,9 @@ function App() {
       const rect = element.getBoundingClientRect()
       return !element.matches(':disabled') && rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < window.innerHeight
     }).map((element) => {
-      const rect = element.getBoundingClientRect()
+      const rect = element instanceof HTMLInputElement
+        ? element.closest('label')?.getBoundingClientRect() ?? element.getBoundingClientRect()
+        : element.getBoundingClientRect()
       const halfWidth = (rect.width / bounds.width) * 50
       const halfHeight = (rect.height / bounds.height) * 50
       return {
@@ -894,7 +897,7 @@ function App() {
           if (entry.element.dataset.dwellAction === 'control') {
             const box = entry.element.getBoundingClientRect()
             const hit = entry.element instanceof HTMLInputElement ? entry.element.closest('label')?.getBoundingClientRect() ?? box : box
-            if (px < hit.left || px > hit.right || py < hit.top || py > hit.bottom) continue
+            if (px < hit.left - 8 || px > hit.right + 8 || py < hit.top - 6 || py > hit.bottom + 6) continue
           } else if (!inBoard || resting || pointerPausedRef.current) continue
           let distance = Math.hypot((x - entry.centerX) * weight.x, (y - entry.centerY) * weight.y)
           // The word already charging holds on unless another is clearly closer, so the
@@ -915,7 +918,7 @@ function App() {
         const current = scores.get(label) ?? 0
         const next = label === nearestLabel ? current + dt : current - dt * DWELL_LEAK
         if (next <= 0) scores.delete(label)
-        else scores.set(label, Math.min(next, DWELL_MS))
+        else scores.set(label, Math.min(next, entry.element.dataset.dwellAction === 'control' ? CONTROL_DWELL_MS : DWELL_MS))
       }
 
       let leaderLabel = ''
@@ -930,7 +933,8 @@ function App() {
       const leader = leaderLabel
         ? (rectsRef.current.find((entry) => entry.element.dataset.dwellTarget === leaderLabel)?.element ?? null)
         : null
-      const progress = clamp(leaderScore / DWELL_MS, 0, 1)
+      const duration = leader?.dataset.dwellAction === 'control' ? CONTROL_DWELL_MS : DWELL_MS
+      const progress = clamp(leaderScore / duration, 0, 1)
       dwellRef.current = { target: leaderLabel, progress }
 
       if (highlightRef.current !== leader) {
@@ -2017,7 +2021,7 @@ function App() {
       </section>
 
       <footer>
-        <span>dwell {DWELL_MS} ms · nearest-word targeting · head pointing</span>
+        <span>words {DWELL_MS} ms · controls {CONTROL_DWELL_MS} ms · nearest-word targeting · head pointing</span>
         <span>head tracking stays on-device · captions use your browser’s speech service</span>
       </footer>
     </main>
