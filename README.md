@@ -38,3 +38,10 @@ Portrait phones use a three-column board and a persistent camera dock; calibrati
 Camera access on a separate phone needs an **HTTPS** deployment with the backend. The Mac's `localhost` URL is not reachable as that same address from the phone. HTTP over a LAN IP does not satisfy the browser's secure-context requirement. Browser/OS camera suspension cannot be prevented by a webpage. Real iOS Safari and Android Chrome camera testing is still necessary; viewport checks and mocked lifecycle tests do not emulate the camera hardware.
 
 Run `npm run test:camera` for constraint fallback and stream lifecycle tests.
+
+### GitHub Pages deployment
+
+The public site is served from the compiled `gh-pages` branch, not the source on `main`.
+Build with `VITE_STATIC_HOST=true npm run build -- --base=/FrontierHackathon/`, then publish the contents of `dist/` (plus an empty `.nojekyll` file) to `gh-pages`. Never copy `.env.local` into that branch. Changes pushed only to `main` do not update the public site.
+
+Pages supports the camera, calibration, speech board, and browser-supported captions over HTTPS. It cannot run the private OpenAI middleware. The static build uses local reply suggestions and disables the OpenAI switch; `npm run dev` retains the private server-backed OpenAI connection. Hosting AI replies publicly requires a server deployment with the API key stored as a private environment variable.
