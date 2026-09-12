@@ -342,6 +342,9 @@ function clockTime() {
   return new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 }
 
+const apiBase = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
+const aiAvailable = import.meta.env.VITE_STATIC_HOST !== 'true' || Boolean(apiBase)
+
 function App() {
   const videoRef = useRef<HTMLVideoElement>(null)
   const stageRef = useRef<HTMLDivElement>(null)
@@ -375,7 +378,7 @@ function App() {
   const [highContrast, setHighContrast] = useState(false)
   const [reduceMotion, setReduceMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches)
   guideOpenRef.current = guideOpen || welcomeOpen || pointerPaused
-    const [aiEnabled, setAiEnabled] = useState(import.meta.env.VITE_STATIC_HOST !== 'true')
+    const [aiEnabled, setAiEnabled] = useState(aiAvailable)
   const [aiStatus, setAiStatus] = useState('Checking OpenAI…')
   const aiEnabledRef = useRef(true)
   const suggestionRequestRef = useRef<AbortController | null>(null)
@@ -580,8 +583,8 @@ function App() {
     aiEnabledRef.current = aiEnabled
     cancelSuggestions()
     const abort = new AbortController()
-    if (!aiEnabled) { setAiStatus(import.meta.env.VITE_STATIC_HOST === 'true' ? 'Local replies · OpenAI requires a hosted backend' : 'Local replies'); return }
-    const check = () => fetch('/api/suggestions/status', { signal: abort.signal })
+    if (!aiEnabled) { setAiStatus(!aiAvailable ? 'Local replies · OpenAI requires a hosted backend' : 'Local replies'); return }
+    const check = () => fetch(`${apiBase}/api/suggestions/status`, { signal: abort.signal })
       .then(r => r.json()).then(data => {
         if (!abort.signal.aborted) setAiStatus(data.message || (data.configured ? 'OpenAI configured' : 'Add your key to enable OpenAI'))
       }).catch(() => { if (!abort.signal.aborted) setAiStatus('Local replies · server unavailable') })
@@ -614,7 +617,7 @@ function App() {
           suggestionRequestRef.current = abort
           const timeout = setTimeout(() => abort.abort(), 12000)
           try {
-            const response = await fetch('/api/suggestions', {
+            const response = await fetch(`${apiBase}/api/suggestions`, {
               method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: abort.signal,
               body: JSON.stringify({ text: text.slice(0, 1500), context: conversationRef.current }),
             })
@@ -1953,7 +1956,7 @@ function App() {
             <label><input type="checkbox" checked={gesturesOn} onChange={e => setGesturesOn(e.target.checked)} />Nod / shake replies</label>
           </div>
           <label className="access-select">Pointer steadiness<select value={stability} onChange={e => setStability(e.target.value as StabilityKey)}>{Object.keys(STABILITY_PRESETS).map(key => <option key={key} value={key}>{key}</option>)}</select></label>
-          <div className="ai-controls"><label><input type="checkbox" checked={aiEnabled} disabled={import.meta.env.VITE_STATIC_HOST === 'true'} onChange={e => setAiEnabled(e.target.checked)} />OpenAI reply suggestions</label><p role="status">{aiStatus}</p><small>When enabled, transcribed text and recent conversation are sent to OpenAI for relevant replies. Your API key stays on the server.</small></div>
+          <div className="ai-controls"><label><input type="checkbox" checked={aiEnabled} disabled={!aiAvailable} onChange={e => setAiEnabled(e.target.checked)} />OpenAI reply suggestions</label><p role="status">{aiStatus}</p><small>When enabled, transcribed text and recent conversation are sent to OpenAI for relevant replies. Your API key stays on the server.</small></div>
         </aside>
 
 

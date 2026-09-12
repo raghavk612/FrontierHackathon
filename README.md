@@ -45,3 +45,11 @@ The public site is served from the compiled `gh-pages` branch, not the source on
 Build with `VITE_STATIC_HOST=true npm run build -- --base=/FrontierHackathon/`, then publish the contents of `dist/` (plus an empty `.nojekyll` file) to `gh-pages`. Never copy `.env.local` into that branch. Changes pushed only to `main` do not update the public site.
 
 Pages supports the camera, calibration, speech board, and browser-supported captions over HTTPS. It cannot run the private OpenAI middleware. The static build uses local reply suggestions and disables the OpenAI switch; `npm run dev` retains the private server-backed OpenAI connection. Hosting AI replies publicly requires a server deployment with the API key stored as a private environment variable.
+
+### Hosted OpenAI backend
+
+Deploy the `render.yaml` Blueprint from `main` on Render. It creates a free Docker web service and asks for `OPENAI_API_KEY` privately. The container copies only the server code, never `.env.local`. `ALLOWED_ORIGINS` permits the GitHub Pages origin. `/health` reports liveness and `/api/suggestions/status` reports configuration without exposing credentials. Requests have size, concurrency, and per-process rate limits; CORS is a browser restriction, not user authentication. This is a public demo endpoint, so usage consumes the server owner's OpenAI credits.
+
+After deployment, build Pages with `VITE_STATIC_HOST=true VITE_API_BASE_URL=https://YOUR-SERVICE.onrender.com npm run build -- --base=/FrontierHackathon/` and publish `dist/` to `gh-pages`. The frontend enables OpenAI only when the backend URL is configured. Keep local replies available if the host is waking up or the API fails. Free hosting can take time to wake after inactivity.
+
+For a local standalone API, run `npm run start:api` (port 3001 by default). Set `PORT` to override it; set `ALLOWED_ORIGINS` to a comma-separated list of approved frontend origins.

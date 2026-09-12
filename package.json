@@ -12,7 +12,8 @@
     "test:suggest": "esbuild src/suggest.test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/suggest-test.mjs --log-level=warning && node node_modules/.cache/suggest-test.mjs",
     "test:server": "node --test server/suggestions.test.mjs",
     "test:position": "esbuild src/gaze/position.test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/position-test.mjs --log-level=warning && node node_modules/.cache/position-test.mjs",
-    "test:camera": "esbuild src/camera.test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/camera-test.mjs --log-level=warning && node node_modules/.cache/camera-test.mjs"
+    "test:camera": "esbuild src/camera.test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/camera-test.mjs --log-level=warning && node node_modules/.cache/camera-test.mjs",
+    "start:api": "node server/index.mjs"
   },
   "devDependencies": {
     "@types/react": "^19.3.0",

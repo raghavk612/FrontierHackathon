@@ -61,3 +61,24 @@ test('quota failures report an actionable message without leaking upstream detai
     error => error.safeForClient && error.message === 'OpenAI credits exhausted · using local replies',
   )
 })
+
+test('hosted backend permits Pages preflight and replies but rejects unrelated sites', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'clearspeak-cors-'))
+  writeFileSync(join(root, '.env.local'), 'OPENAI_API_KEY=test-only\n')
+  const origin = 'https://raghavk612.github.io'
+  const middleware = suggestionMiddleware(root, async () => options, { allowedOrigins: [origin] })
+  const server = createServer((req, res) => middleware(req, res, () => { res.writeHead(404); res.end() }))
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  const url = `http://127.0.0.1:${server.address().port}/api/suggestions`
+  try {
+    const preflight = await fetch(url, { method: 'OPTIONS', headers: { Origin: origin, 'Access-Control-Request-Method': 'POST' } })
+    assert.equal(preflight.status, 204)
+    assert.equal(preflight.headers.get('access-control-allow-origin'), origin)
+    const response = await fetch(url, { method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'Would you like some water?' }) })
+    assert.deepEqual(await response.json(), options)
+    assert.equal(response.headers.get('access-control-allow-origin'), origin)
+    const denied = await fetch(url, { method: 'OPTIONS', headers: { Origin: 'https://unrelated.example' } })
+    assert.equal(denied.status, 403)
+    assert.equal(denied.headers.get('access-control-allow-origin'), null)
+  } finally { await new Promise(resolve => server.close(resolve)); rmSync(root, { recursive: true }) }
+})

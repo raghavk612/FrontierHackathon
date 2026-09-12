@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: clearspeak-replies
+    runtime: docker
+    plan: free
+    branch: main
+    dockerfilePath: ./Dockerfile.api
+    healthCheckPath: /health
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-4.1-mini
+      - key: ALLOWED_ORIGINS
+        value: https://raghavk612.github.io

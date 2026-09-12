@@ -76,7 +76,7 @@ export async function generateSuggestions(input, settings, fetcher = fetch) {
   return { words: result.words, because: result.because.slice(0, 120) }
 }
 
-export function suggestionMiddleware(root, generate = generateSuggestions) {
+export function suggestionMiddleware(root, generate = generateSuggestions, options = {}) {
   let active = 0
   let windowStart = 0
   let requests = 0
@@ -88,8 +88,18 @@ export function suggestionMiddleware(root, generate = generateSuggestions) {
       res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
       res.end(JSON.stringify(body))
     }
-    // This local application only accepts same-origin calls, never cross-site API use.
-    if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}` && req.headers.origin !== `https://${req.headers.host}`) return send(403, { error: 'Origin not allowed' })
+    const origin = req.headers.origin
+    const allowed = options.allowedOrigins
+      ? options.allowedOrigins.includes(origin)
+      : origin === `http://${req.headers.host}` || origin === `https://${req.headers.host}`
+    if (origin && !allowed) return send(403, { error: 'Origin not allowed' })
+    if (origin && allowed) {
+      res.setHeader('Access-Control-Allow-Origin', origin)
+      res.setHeader('Vary', 'Origin')
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+    }
+    if (req.method === 'OPTIONS') { res.writeHead(204); return res.end() }
     const settings = readSettings(root)
     if (path.endsWith('/status') && req.method === 'GET') return send(200, { configured: Boolean(settings.key), ...(lastError ? { message: lastError } : {}) })
     if (req.method !== 'POST') return send(405, { error: 'Method not allowed' })
