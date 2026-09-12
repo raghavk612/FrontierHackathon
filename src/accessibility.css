@@ -73,3 +73,20 @@ select:focus-visible { outline:3px solid #ffd17c; outline-offset:3px; }
 .topbar > div:first-child { min-width:0; }
 .topbar h1 { font-size:clamp(24px,3vw,46px); line-height:1.08; max-width:1000px; text-wrap:balance; }
 @media(max-width:600px) { .topbar h1 { font-size:25px; } .header-actions { flex-shrink:0; max-width:125px; } .topbar .eyebrow { font-size:9px; } }
+/* Captions and microphone access come before the board at every screen size. */
+.transcript-rail { position:sticky; top:8px; z-index:30; grid-row:1; grid-template-columns:auto minmax(0,1fr); padding:8px 12px; gap:12px; }
+.transcript-feed { max-height:4.5em; overflow-y:auto; }
+.transcript-rail .caption-live { font-size:16px; line-height:1.4; }
+.transcript-rail .caption-idle { font-size:13px; line-height:1.35; }
+.transcript-rail > .panel-copy { grid-column:1/-1; margin:0; }
+@media(max-width:600px) {
+ .transcript-rail { top:4px; gap:8px; padding:8px; }
+ .transcript-head { flex-direction:column; align-items:stretch; gap:4px; }
+ .transcript-head .section-kicker { font-size:9px; }
+ .transcript-toggle { min-height:44px; padding:6px 10px; }
+ .stage { height:clamp(350px,calc(100svh - 285px),560px); min-height:350px; }
+}
+@media(orientation:landscape) and (max-height:550px) {
+ .transcript-rail { padding:4px 8px; }
+ .transcript-feed { max-height:2.8em; }
+}

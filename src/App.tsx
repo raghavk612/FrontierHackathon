@@ -1645,6 +1645,36 @@ function App() {
       </header>
 
       <section className="workspace">
+        <aside className="transcript-rail" aria-label="What they said">
+          <div className="transcript-head">
+            <p className="section-kicker">what they said</p>
+            <button
+              className="transcript-toggle"
+              onClick={() => setListening((current) => !current)}
+              disabled={!recognitionAvailable()}
+            >
+              {listening ? 'Stop' : 'Listen'}
+            </button>
+          </div>
+          <div className="transcript-feed" aria-live="polite">
+            {caption ? (
+              <p className="caption-live interim">{caption}</p>
+            ) : lastHeard ? (
+              <p className="caption-live">{lastHeard}</p>
+            ) : (
+              <p className="caption-idle">
+                {listening
+                  ? 'Listening.'
+                  : 'Captions anyone talking near the computer, so you can read what you missed.'}
+              </p>
+            )}
+          </div>
+          {listenError ? (
+            <p className="panel-copy tight warn">{listenError}</p>
+          ) : !recognitionAvailable() ? (
+            <p className="panel-copy tight warn">This browser cannot do captions. Chrome or Edge will work.</p>
+          ) : null}
+        </aside>
         <div ref={stageRef} className={`stage ${guideOpen && !collecting ? 'with-guide' : ''} ${collecting ? 'is-calibrating' : ''}`} aria-label="Speech board stage">
           <video ref={videoRef} className="camera-feed" muted playsInline aria-label="Webcam preview" />
           <canvas ref={overlayRef} className="detection-overlay" aria-hidden="true" />
@@ -1926,36 +1956,7 @@ function App() {
           <div className="ai-controls"><label><input type="checkbox" checked={aiEnabled} onChange={e => setAiEnabled(e.target.checked)} />OpenAI reply suggestions</label><p role="status">{aiStatus}</p><small>When enabled, transcribed text and recent conversation are sent to OpenAI for relevant replies. Your API key stays on the server.</small></div>
         </aside>
 
-        <aside className="transcript-rail" aria-label="What they said">
-          <div className="transcript-head">
-            <p className="section-kicker">what they said</p>
-            <button
-              className="transcript-toggle"
-              onClick={() => setListening((current) => !current)}
-              disabled={!recognitionAvailable()}
-            >
-              {listening ? 'Stop' : 'Listen'}
-            </button>
-          </div>
-          <div className="transcript-feed" aria-live="polite">
-            {caption ? (
-              <p className="caption-live interim">{caption}</p>
-            ) : lastHeard ? (
-              <p className="caption-live">{lastHeard}</p>
-            ) : (
-              <p className="caption-idle">
-                {listening
-                  ? 'Listening.'
-                  : 'Captions anyone talking near the computer, so you can read what you missed.'}
-              </p>
-            )}
-          </div>
-          {listenError ? (
-            <p className="panel-copy tight warn">{listenError}</p>
-          ) : !recognitionAvailable() ? (
-            <p className="panel-copy tight warn">This browser cannot do captions. Chrome or Edge will work.</p>
-          ) : null}
-        </aside>
+
       </section>
 
       <section className="conversation">
