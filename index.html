@@ -3,28 +3,26 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>v1 · face tracking only</title>
+    <title>v2 · pointing and picking</title>
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
     <main>
-      <h1>Version 1 — it can see your face</h1>
+      <h1>Version 2 — your head moves a pointer</h1>
       <p class="sub">
-        The webcam finds 478 points on your face and works out which way your head is pointing. That is all it does.
-        There is nothing to select and nothing to say.
+        Turn your head to move the dot, hold it on a word for a second, and the computer says it. No calibration, no
+        smoothing — the pointer goes straight from the head angle to the screen. Try to hit the word you actually want.
       </p>
       <div class="stage">
         <video id="video" playsinline muted></video>
-        <canvas id="overlay"></canvas>
+        <div id="board"></div>
+        <div id="cursor"></div>
         <p id="status">Camera off.</p>
       </div>
-      <button id="start">Turn the camera on</button>
-      <dl id="readout">
-        <div><dt>face found</dt><dd id="found">no</dd></div>
-        <div><dt>looking across</dt><dd id="yaw">—</dd></div>
-        <div><dt>looking up / down</dt><dd id="pitch">—</dd></div>
-        <div><dt>points tracked</dt><dd id="count">0</dd></div>
-      </dl>
+      <div class="row">
+        <button id="start">Turn the camera on</button>
+        <p class="said">last said: <strong id="said">nothing yet</strong></p>
+      </div>
     </main>
     <script type="module" src="/src/main.ts"></script>
   </body>
