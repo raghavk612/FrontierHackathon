@@ -375,7 +375,7 @@ function App() {
   const [highContrast, setHighContrast] = useState(false)
   const [reduceMotion, setReduceMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches)
   guideOpenRef.current = guideOpen || welcomeOpen || pointerPaused
-    const [aiEnabled, setAiEnabled] = useState(true)
+    const [aiEnabled, setAiEnabled] = useState(import.meta.env.VITE_STATIC_HOST !== 'true')
   const [aiStatus, setAiStatus] = useState('Checking OpenAI…')
   const aiEnabledRef = useRef(true)
   const suggestionRequestRef = useRef<AbortController | null>(null)
@@ -580,7 +580,7 @@ function App() {
     aiEnabledRef.current = aiEnabled
     cancelSuggestions()
     const abort = new AbortController()
-    if (!aiEnabled) { setAiStatus('Local replies'); return }
+    if (!aiEnabled) { setAiStatus(import.meta.env.VITE_STATIC_HOST === 'true' ? 'Local replies · OpenAI requires a hosted backend' : 'Local replies'); return }
     const check = () => fetch('/api/suggestions/status', { signal: abort.signal })
       .then(r => r.json()).then(data => {
         if (!abort.signal.aborted) setAiStatus(data.message || (data.configured ? 'OpenAI configured' : 'Add your key to enable OpenAI'))
@@ -1402,10 +1402,10 @@ function App() {
       video.playsInline = true
       video.srcObject = stream
       await video.play()
-      const vision = await FilesetResolver.forVisionTasks('/mediapipe')
+      const vision = await FilesetResolver.forVisionTasks(`${import.meta.env.BASE_URL}mediapipe`)
       if (session !== cameraSessionRef.current) return
       const options = {
-        baseOptions: { modelAssetPath: '/face_landmarker.task', delegate: 'GPU' as const },
+        baseOptions: { modelAssetPath: `${import.meta.env.BASE_URL}face_landmarker.task`, delegate: 'GPU' as const },
         runningMode: 'VIDEO' as const, numFaces: 1,
         outputFaceBlendshapes: true, outputFacialTransformationMatrixes: true,
       }
@@ -1953,7 +1953,7 @@ function App() {
             <label><input type="checkbox" checked={gesturesOn} onChange={e => setGesturesOn(e.target.checked)} />Nod / shake replies</label>
           </div>
           <label className="access-select">Pointer steadiness<select value={stability} onChange={e => setStability(e.target.value as StabilityKey)}>{Object.keys(STABILITY_PRESETS).map(key => <option key={key} value={key}>{key}</option>)}</select></label>
-          <div className="ai-controls"><label><input type="checkbox" checked={aiEnabled} onChange={e => setAiEnabled(e.target.checked)} />OpenAI reply suggestions</label><p role="status">{aiStatus}</p><small>When enabled, transcribed text and recent conversation are sent to OpenAI for relevant replies. Your API key stays on the server.</small></div>
+          <div className="ai-controls"><label><input type="checkbox" checked={aiEnabled} disabled={import.meta.env.VITE_STATIC_HOST === 'true'} onChange={e => setAiEnabled(e.target.checked)} />OpenAI reply suggestions</label><p role="status">{aiStatus}</p><small>When enabled, transcribed text and recent conversation are sent to OpenAI for relevant replies. Your API key stays on the server.</small></div>
         </aside>
 
 
