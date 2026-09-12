@@ -113,3 +113,48 @@ select:focus-visible { outline:3px solid #ffd17c; outline-offset:3px; }
  .access-intro .section-kicker { display:none; }
  .access-panel { padding-top:8px; padding-bottom:8px; }
 }
+/* Phone controls prioritize readable words and generous touch targets. */
+@media(max-width:600px) {
+ .app-shell { padding:8px 8px calc(124px + env(safe-area-inset-bottom)); }
+ .topbar { margin-bottom:8px; padding-bottom:8px; gap:10px; }
+ .topbar h1 { font-size:20px; line-height:1.15; text-wrap:pretty; }
+ .topbar .eyebrow { letter-spacing:.03em; font-size:10px; margin-bottom:5px; }
+ .header-actions { max-width:115px; gap:5px; }
+ .guide-help { min-height:48px; padding:8px; font-size:13px; }
+ .workspace { gap:8px; }
+ .transcript-rail { padding:8px; }
+ .transcript-toggle { min-height:48px; font-size:13px; }
+ .transcript-rail .caption-idle { font-size:14px; }
+ .transcript-feed { max-height:5.6em; }
+ .stage { height:clamp(390px,calc(100svh - 300px),640px); min-height:390px; }
+ .sentence-bar { display:grid; grid-template-columns:1fr 1fr; top:8px; height:108px; left:4%; right:4%; padding:6px; gap:6px; }
+ .sentence-words { grid-column:1/-1; min-height:32px; width:100%; scrollbar-width:thin; }
+ .sentence-control { width:100%; height:48px; min-height:48px; font-size:16px; padding:8px; }
+ .sentence-placeholder { font-size:15px; }
+ .board-grid { top:124px; bottom:62px; gap:7px; left:4%; right:4%; }
+ .board-grid .dwell-target { min-height:44px; font-size:16px; padding:6px; }
+ .rest-zone { width:3%; top:124px; font-size:8px; }
+ .stage-label { left:5%; right:5%; bottom:8px; }
+ .stage-label span { font-size:12px; line-height:1.3; }
+ .camera-actions { grid-template-columns:1fr 1fr; gap:8px; padding:8px 10px max(8px,env(safe-area-inset-bottom)); }
+ .camera-actions button { min-height:48px; font-size:15px; padding:8px; }
+ .access-panel label { min-height:48px; font-size:15px; }
+ .access-panel input { width:24px; height:24px; }
+ .access-select select,.voice-pick select { min-height:48px; font-size:16px; }
+ .access-options { gap:6px 12px; }
+ .access-panel small { font-size:13px; }
+ .large-text .board-grid .dwell-target { font-size:19px; }
+ .welcome-card { padding:22px 18px; }
+ .welcome-title { font-size:28px; }
+ button { touch-action:manipulation; }
+}
+@media(max-width:360px) {
+ .access-options { grid-template-columns:1fr; }
+ .topbar h1 { font-size:18px; }
+}
+@media(max-width:600px) {
+ .topbar { flex-wrap:nowrap; }
+ .header-actions { width:auto; flex-wrap:nowrap; }
+ .stage { height:clamp(390px,calc(100svh - 330px),610px); }
+}
+@media(max-width:360px) { .topbar { padding-bottom:2px; margin-bottom:4px; } }
